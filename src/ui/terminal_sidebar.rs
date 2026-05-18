@@ -1,0 +1,61 @@
+use crate::ui::connection_view::ActiveSession;
+use crate::ui::sidebar::Sidebar;
+use crate::ui::sidebar::SidebarPage;
+use crate::ui::sidebar_common::{sidebar_brand_row, sidebar_sessions_panel, SidebarSessionAction};
+
+pub struct TerminalSidebarAction {
+    pub select_session: Option<String>,
+    pub close_session: Option<String>,
+    pub new_window_session: Option<String>,
+    pub go_home: bool,
+    pub settings_open: bool,
+}
+
+pub fn terminal_sidebar(
+    ui: &mut egui::Ui,
+    sidebar: &mut Sidebar,
+    settings_open: &mut bool,
+    sessions: &[ActiveSession],
+    active_id: Option<&str>,
+) -> TerminalSidebarAction {
+    let mut action = TerminalSidebarAction {
+        select_session: None,
+        close_session: None,
+        new_window_session: None,
+        go_home: false,
+        settings_open: *settings_open,
+    };
+
+    let show_ham = sidebar.show_panel_hamburger(SidebarPage::Workspace);
+    sidebar_brand_row(ui, sidebar, SidebarPage::Workspace, show_ham);
+    ui.add_space(2.0);
+    ui.separator();
+
+    if ui
+        .selectable_label(false, egui::RichText::new("\u{2302}  Home").size(14.0))
+        .clicked()
+    {
+        action.go_home = true;
+    }
+    let settings_sel = *settings_open;
+    if ui
+        .selectable_label(
+            settings_sel,
+            egui::RichText::new("\u{2699}  Settings").size(14.0),
+        )
+        .clicked()
+    {
+        *settings_open = !*settings_open;
+        action.settings_open = *settings_open;
+    }
+
+    ui.add_space(4.0);
+    ui.separator();
+
+    let sess = sidebar_sessions_panel(ui, sessions, active_id);
+    action.select_session = sess.select_session;
+    action.close_session = sess.close_session;
+    action.new_window_session = sess.new_window_session;
+
+    action
+}
