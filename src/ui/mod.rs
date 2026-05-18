@@ -12,3 +12,4 @@ pub mod sidebar;
 pub mod terminal_sidebar;
 pub mod terminal_paint;
 pub mod terminal_selection;
+pub mod terminal_mouse;

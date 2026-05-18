@@ -131,6 +131,15 @@ pub struct Screen {
     /// Bracketed paste
     bracketed_paste: bool,
 
+    /// xterm DECSET ?1000 — report mouse click/release.
+    mouse_report_clicks: bool,
+    /// xterm DECSET ?1002 — report mouse drag with button down.
+    mouse_report_drag: bool,
+    /// xterm DECSET ?1003 — report all mouse motion.
+    mouse_report_motion: bool,
+    /// xterm DECSET ?1006 — SGR extended mouse coordinates.
+    mouse_sgr_encoding: bool,
+
     /// Title
     pub title: String,
 
@@ -203,6 +212,10 @@ impl Screen {
             app_cursor_keys: false,
             app_keypad: false,
             bracketed_paste: false,
+            mouse_report_clicks: false,
+            mouse_report_drag: false,
+            mouse_report_motion: false,
+            mouse_sgr_encoding: false,
             title: String::new(),
             pending_cr: false,
             suppress_extra_crlf_newline: false,
@@ -717,6 +730,26 @@ impl Screen {
         self.bracketed_paste
     }
 
+    pub fn mouse_tracking_active(&self) -> bool {
+        self.mouse_report_clicks || self.mouse_report_drag || self.mouse_report_motion
+    }
+
+    pub fn mouse_report_clicks(&self) -> bool {
+        self.mouse_report_clicks
+    }
+
+    pub fn mouse_report_drag(&self) -> bool {
+        self.mouse_report_drag
+    }
+
+    pub fn mouse_report_motion(&self) -> bool {
+        self.mouse_report_motion
+    }
+
+    pub fn mouse_sgr_encoding(&self) -> bool {
+        self.mouse_sgr_encoding
+    }
+
     pub fn application_cursor_keys(&self) -> bool {
         self.app_cursor_keys
     }
@@ -1137,6 +1170,16 @@ impl TermHandler for Screen {
                             (12, _) => {}
                             (25, s) => self.cursor_visible = s,
                             (2004, s) => self.bracketed_paste = s,
+                            (1000, s) => self.mouse_report_clicks = s,
+                            (1002, s) => self.mouse_report_drag = s,
+                            (1003, s) => {
+                                self.mouse_report_motion = s;
+                                if s {
+                                    self.mouse_report_drag = true;
+                                    self.mouse_report_clicks = true;
+                                }
+                            }
+                            (1006, s) => self.mouse_sgr_encoding = s,
                             _ => {}
                         },
                         (25, _) if !private => self.cursor_visible = set,

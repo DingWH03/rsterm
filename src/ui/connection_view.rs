@@ -13,6 +13,7 @@ use crate::ui::terminal_input::{
     allocate_terminal_surface, lock_terminal_focus, process_keyboard_input, terminal_widget_id,
 };
 use crate::ui::terminal_paint::{paint_row, RowGalleyCache};
+use crate::ui::terminal_mouse::{process_terminal_mouse, process_terminal_wheel};
 use crate::ui::terminal_selection::{
     CellPos, TerminalSelection, paint_selection, paste_payload, update_terminal_selection,
 };
@@ -49,6 +50,8 @@ pub struct ActiveSession {
     pub size_label_active: bool,
     /// Frames left to aggressively drain PTY output after an alternate-screen resize.
     pub alt_resize_drain_frames: u8,
+    /// Last cell reported for xterm mouse motion (dedupe).
+    pub mouse_motion_last: Option<(usize, usize)>,
 }
 
 pub enum ConnectionViewAction {
@@ -354,25 +357,43 @@ pub fn connection_view(
                 session.scroll_offset = 0;
             }
 
-            // Scroll wheel (main screen only): wheel down → view newer lines (toward bottom).
-            let scroll_delta = if in_alt {
-                0
-            } else {
-                term_resp.ctx.input(|i| {
-                    let mut delta = 0f32;
-                    for event in &i.events {
-                        if let egui::Event::MouseWheel { delta: d, .. } = event {
-                            delta += d.y;
-                        }
-                    }
-                    (delta * 3.0).round() as isize
-                })
-            };
-
             let sb_lines = screen.scrollback_lines();
-            if scroll_delta != 0 && sb_lines > 0 {
-                let new_offset = session.scroll_offset as isize + scroll_delta;
-                session.scroll_offset = new_offset.clamp(0, sb_lines as isize) as usize;
+            let mouse_to_pty = screen.mouse_tracking_active() && !modifiers.shift;
+            let mut wheel_input: Vec<Vec<u8>> = Vec::new();
+            process_terminal_wheel(
+                &term_resp,
+                grid_rect,
+                cell_w,
+                cell_h,
+                grid_rows,
+                grid_cols,
+                screen,
+                in_alt,
+                sb_lines,
+                &mut session.scroll_offset,
+                &mut wheel_input,
+            );
+            for bytes in wheel_input {
+                session.handle.send(bytes);
+            }
+
+            let mut mouse_input: Vec<Vec<u8>> = Vec::new();
+            if mouse_to_pty {
+                process_terminal_mouse(
+                    ui,
+                    &term_resp,
+                    grid_rect,
+                    cell_w,
+                    cell_h,
+                    grid_rows,
+                    grid_cols,
+                    screen,
+                    &mut mouse_input,
+                    &mut session.mouse_motion_last,
+                );
+            }
+            for bytes in mouse_input {
+                session.handle.send(bytes);
             }
 
             let offset = session.scroll_offset;
@@ -441,20 +462,22 @@ pub fn connection_view(
                 paint_selection(&painter, screen, theme, grid_rect, cell_w, cell_h, offset, sel);
             }
 
-            // Update selection from mouse/touch
-            update_terminal_selection(
-                &mut session.selection,
-                &mut session.selection_pointer,
-                screen,
-                offset,
-                ui,
-                &term_resp,
-                grid_rect,
-                cell_w,
-                cell_h,
-                grid_rows,
-                grid_cols,
-            );
+            // Selection from mouse/touch (disabled while mouse reporting unless Shift).
+            if !mouse_to_pty {
+                update_terminal_selection(
+                    &mut session.selection,
+                    &mut session.selection_pointer,
+                    screen,
+                    offset,
+                    ui,
+                    &term_resp,
+                    grid_rect,
+                    cell_w,
+                    cell_h,
+                    grid_rows,
+                    grid_cols,
+                );
+            }
 
             if show_size_label {
                 let (label_cols, label_rows) = if desired_cols != grid_cols || desired_rows != grid_rows {

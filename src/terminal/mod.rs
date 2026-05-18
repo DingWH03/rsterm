@@ -233,6 +233,17 @@ mod tests {
     }
 
     #[test]
+    fn decset_mouse_tracking_modes() {
+        let mut term = Terminal::new(24, 80);
+        term.write(b"\x1b[?1006h\x1b[?1002h");
+        assert!(term.screen.mouse_sgr_encoding());
+        assert!(term.screen.mouse_report_drag());
+        term.write(b"\x1b[?1003h");
+        assert!(term.screen.mouse_report_motion());
+        assert!(term.screen.mouse_tracking_active());
+    }
+
+    #[test]
     fn window_size_report_18t() {
         let mut term = Terminal::new(24, 80);
         term.write(b"\x1b[18t");
