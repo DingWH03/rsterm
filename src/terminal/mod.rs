@@ -220,16 +220,16 @@ mod tests {
     }
 
     #[test]
-    fn csi_8_resize_emits_pty_resize_event() {
+    fn csi_8_resize_window_is_ignored() {
         let mut term = Terminal::new(24, 80);
         term.write(b"\x1b[8;30;100t");
         let pending = term.drain_pending();
         assert!(
-            pending.iter().any(|e| matches!(e, TermEvent::PtyResize { rows: 30, cols: 100 })),
-            "CSI 8 must request matching PTY size for ncurses apps like htop, got {pending:?}"
+            pending.is_empty(),
+            "CSI 8 must not resize the grid or PTY (window owned by rsterm), got {pending:?}"
         );
-        assert_eq!(term.screen.rows, 30);
-        assert_eq!(term.screen.cols, 100);
+        assert_eq!(term.screen.rows, 24);
+        assert_eq!(term.screen.cols, 80);
     }
 
     #[test]

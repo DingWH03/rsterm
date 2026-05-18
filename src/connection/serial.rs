@@ -67,7 +67,7 @@ pub fn connect_serial(config: &SavedConnection) -> Result<ConnectionHandle, Stri
                     let _ = writer.write_all(&data);
                     let _ = writer.flush();
                 }
-                Ok(ConnOut::Resize(_, _)) => {}
+                Ok(ConnOut::Resize(_, _)) | Ok(ConnOut::Winch) => {}
                 Ok(ConnOut::Close) => {
                     writer_alive.store(false, Ordering::Relaxed);
                     let _ = from_conn_tx

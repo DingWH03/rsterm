@@ -167,6 +167,7 @@ async fn run_ssh(
                             .window_change(cols.max(1) as u32, rows.max(1) as u32, 0, 0)
                             .await;
                     }
+                    Some(ConnOut::Winch) => {}
                     Some(ConnOut::Close) | None => break,
                 }
             }

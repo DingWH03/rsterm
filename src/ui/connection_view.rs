@@ -47,6 +47,8 @@ pub struct ActiveSession {
     pub size_label_hide_at: Option<Instant>,
     /// True after the user has resized at least once (suppress overlay on connect).
     pub size_label_active: bool,
+    /// Frames left to aggressively drain PTY output after an alternate-screen resize.
+    pub alt_resize_drain_frames: u8,
 }
 
 pub enum ConnectionViewAction {
@@ -168,6 +170,8 @@ pub fn connection_view(
 
     if let Some(session) = session.as_mut() {
         let font_changed = (session.layout_font_size - *font_size).abs() > f32::EPSILON;
+        let in_alt = session.terminal.screen.in_alternate_screen();
+
         let pty_rows = session.last_pty_rows as usize;
         let pty_cols = session.last_pty_cols as usize;
         let size_changed = desired_rows != grid_rows
@@ -177,10 +181,17 @@ pub fn connection_view(
             || font_changed;
 
         if size_changed {
-            // PTY first so ncurses/htop see SIGWINCH before we resize the emulator grid.
-            sync_pty_size(session, desired_rows, desired_cols);
-            sync_display_grid(session, renderer, desired_rows, desired_cols, *font_size);
-            while drain_connection(session, &mut action) {}
+            if in_alt {
+                // Emulator grid must match before ncurses paints the post-SIGWINCH refresh (~10kB).
+                sync_display_grid(session, renderer, desired_rows, desired_cols, *font_size);
+                sync_pty_size(session, desired_rows, desired_cols);
+                session.alt_resize_drain_frames = 120;
+            } else {
+                sync_pty_size(session, desired_rows, desired_cols);
+                sync_display_grid(session, renderer, desired_rows, desired_cols, *font_size);
+            }
+            drain_after_resize(session, &mut action, in_alt);
+            ctx.request_repaint();
             resize_applied = true;
         }
     }
@@ -188,8 +199,12 @@ pub fn connection_view(
     let grid_cols = renderer.cols;
     let grid_rows = renderer.rows;
 
-    // 3. Process connection data AFTER resize (PTY echo may arrive async)
+    // 3. Process connection data (keep draining after alt-screen resize; ncurses redraw is bursty)
     if let Some(session) = session.as_mut() {
+        if session.alt_resize_drain_frames > 0 {
+            session.alt_resize_drain_frames -= 1;
+            drain_after_resize(session, &mut action, true);
+        }
         while drain_connection(session, &mut action) {}
     }
 
@@ -314,7 +329,19 @@ pub fn connection_view(
 
         let show_size_label = session
             .as_mut()
-            .map(|s| size_label_visible(s, grid_cols, grid_rows, &ctx))
+            .map(|s| {
+                let label_cols = if desired_cols != grid_cols {
+                    desired_cols
+                } else {
+                    grid_cols
+                };
+                let label_rows = if desired_rows != grid_rows {
+                    desired_rows
+                } else {
+                    grid_rows
+                };
+                size_label_visible(s, label_cols, label_rows, &ctx)
+            })
             .unwrap_or(false);
 
         if let Some(session) = session.as_mut() {
@@ -430,7 +457,12 @@ pub fn connection_view(
             );
 
             if show_size_label {
-                let dim_label = format!("{grid_cols}×{grid_rows}");
+                let (label_cols, label_rows) = if desired_cols != grid_cols || desired_rows != grid_rows {
+                    (desired_cols, desired_rows)
+                } else {
+                    (grid_cols, grid_rows)
+                };
+                let dim_label = format!("{label_cols}×{label_rows}");
                 let dim_color = egui::Color32::from_rgba_premultiplied(
                     theme.fg.r(),
                     theme.fg.g(),
@@ -525,6 +557,27 @@ fn size_label_visible(
     session.size_label_hide_at.is_some_and(|deadline| now < deadline)
 }
 
+/// Pull as much post-resize output as possible (htop sends a full-screen refresh via ncurses).
+fn drain_after_resize(
+    session: &mut ActiveSession,
+    action: &mut ConnectionViewAction,
+    in_alt: bool,
+) {
+    for _ in 0..256 {
+        if !drain_connection(session, action) {
+            break;
+        }
+    }
+    if in_alt {
+        session.handle.signal_winch();
+        for _ in 0..128 {
+            if !drain_connection(session, action) {
+                break;
+            }
+        }
+    }
+}
+
 /// Resize the on-screen cell grid to match the window (immediate, centered layout).
 fn sync_display_grid(
     session: &mut ActiveSession,
@@ -599,7 +652,9 @@ pub(crate) fn drain_connection(session: &mut ActiveSession, action: &mut Connect
     for resp in session.terminal.drain_pending() {
         match resp {
             TermEvent::Response(data) => session.handle.send(data),
-            TermEvent::PtyResize { rows, cols } => sync_pty_size(session, rows, cols),
+            TermEvent::PtyResize { rows: _, cols: _ } => {
+                // CSI 8 no longer emits this; keep arm so older tests / sequences do not resize the PTY.
+            }
         }
     }
     updated

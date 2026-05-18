@@ -5,7 +5,10 @@ mod process;
 mod serial;
 mod shell;
 
-pub use process::{foreground_command, local_user_at_host, ssh_user_at_host, title_is_idle_host, truncate_label};
+pub use process::{
+    foreground_command, foreground_process_pid, local_user_at_host, ssh_user_at_host,
+    title_is_idle_host, truncate_label,
+};
 
 pub use ble::scan_ble_devices_blocking;
 pub use serial::{enumerate_serial_ports, SerialDevice};

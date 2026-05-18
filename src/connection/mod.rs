@@ -38,6 +38,8 @@ pub enum ConnIn {
 pub enum ConnOut {
     Data(Vec<u8>),
     Resize(u16, u16),
+    /// Re-deliver SIGWINCH without changing winsize (ncurses full refresh after resize).
+    Winch,
     Close,
 }
 
@@ -100,6 +102,8 @@ pub struct ConnectionHandle {
     pub repaint: RepaintNotifier,
     /// Local PTY shell PID (for tab foreground process label).
     pub shell_pid: Option<u32>,
+    /// Local PTY: blocks until the writer thread applies `TIOCSWINSZ` (keeps SIGWINCH before emulator resize).
+    blocking_resize: Option<std::sync::mpsc::SyncSender<(u16, u16)>>,
     _reader_thread: Option<std::thread::JoinHandle<()>>,
     _writer_thread: Option<std::thread::JoinHandle<()>>,
     _pty_child: Option<Box<dyn portable_pty::Child + Send + Sync>>,
@@ -119,6 +123,7 @@ impl ConnectionHandle {
             state: ConnectionState::Connecting,
             repaint,
             shell_pid: None,
+            blocking_resize: None,
             _reader_thread: Some(reader_thread),
             _writer_thread: Some(writer_thread),
             _pty_child: None,
@@ -131,12 +136,29 @@ impl ConnectionHandle {
         self
     }
 
+    pub fn with_blocking_resize(
+        mut self,
+        tx: std::sync::mpsc::SyncSender<(u16, u16)>,
+    ) -> Self {
+        self.blocking_resize = Some(tx);
+        self
+    }
+
     pub fn send(&self, data: Vec<u8>) {
         let _ = self.sender.send(ConnOut::Data(data));
     }
 
     pub fn resize(&self, rows: u16, cols: u16) {
-        let _ = self.sender.send(ConnOut::Resize(rows, cols));
+        if let Some(tx) = &self.blocking_resize {
+            let _ = tx.send((rows, cols));
+        } else {
+            let _ = self.sender.send(ConnOut::Resize(rows, cols));
+        }
+    }
+
+    /// Ask the PTY writer to signal SIGWINCH again (htop/ncurses may need this after the grid catches up).
+    pub fn signal_winch(&self) {
+        let _ = self.sender.send(ConnOut::Winch);
     }
 
     pub fn close(&self) {

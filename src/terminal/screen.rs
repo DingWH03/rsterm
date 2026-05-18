@@ -425,6 +425,7 @@ impl Screen {
 
         let old_rows = self.rows;
         let old_cols = self.cols;
+        let in_alt = self.in_alternate_screen();
         self.cells = Self::resize_grid(&self.cells, old_rows, old_cols, rows, cols);
         if let Some(main) = self.saved_main.as_mut() {
             main.cells = Self::resize_grid(&main.cells, old_rows, old_cols, rows, cols);
@@ -435,7 +436,7 @@ impl Screen {
         self.cursor_x = self.cursor_x.min(cols.saturating_sub(1));
         self.scroll_top = self.scroll_top.min(rows.saturating_sub(1));
         self.scroll_bottom = rows.saturating_sub(1);
-        if self.in_alternate_screen() {
+        if in_alt {
             self.scroll_top = 0;
             self.scroll_bottom = rows.saturating_sub(1);
         }
@@ -1165,13 +1166,10 @@ impl TermHandler for Screen {
                 let ps = def(0, 0);
                 match ps {
                     8 => {
-                        let h = def(1, self.rows as i64) as usize;
-                        let w = def(2, self.cols as i64) as usize;
-                        if h > 0 && w > 0 && (h != self.rows || w != self.cols) {
-                            self.resize(h, w);
-                            self.outgoing
-                                .push(TermEvent::PtyResize { rows: h, cols: w });
-                        }
+                        // xterm: application asks the *terminal emulator* to resize its window.
+                        // rsterm owns window geometry from the egui layout; honoring CSI 8 here would
+                        // let stale ncurses LINES/COLS snap the PTY back after a UI resize (htop 3.x).
+                        // Size changes are delivered via kernel winsize + SIGWINCH instead (like Konsole).
                     }
                     14 => {
                         let px_h = (self.rows * 16).max(1);

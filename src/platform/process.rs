@@ -20,8 +20,9 @@ pub fn foreground_command(shell_pid: Option<u32>) -> Option<String> {
     foreground_command_for_pid(pid)
 }
 
+/// PID of the foreground job in a local shell PTY (e.g. htop), if any.
 #[cfg(target_os = "linux")]
-fn foreground_command_for_pid(shell_pid: u32) -> Option<String> {
+pub fn foreground_process_pid(shell_pid: u32) -> Option<u32> {
     let children = read_proc_children(shell_pid)?;
     for &child in children.iter().rev() {
         if child == shell_pid {
@@ -30,10 +31,27 @@ fn foreground_command_for_pid(shell_pid: u32) -> Option<String> {
         let args = read_cmdline(child)?;
         let short = format_cmdline(&args);
         if !short.is_empty() && !is_interactive_shell(&short) {
-            return Some(short);
+            return Some(child);
         }
     }
     None
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn foreground_process_pid(_shell_pid: u32) -> Option<u32> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn foreground_command_for_pid(shell_pid: u32) -> Option<String> {
+    let pid = foreground_process_pid(shell_pid)?;
+    let args = read_cmdline(pid)?;
+    let short = format_cmdline(&args);
+    if short.is_empty() {
+        None
+    } else {
+        Some(short)
+    }
 }
 
 #[cfg(not(target_os = "linux"))]

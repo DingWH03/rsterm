@@ -2,7 +2,8 @@
 pub enum TermEvent {
     /// Send response string to host (e.g. answer to `CSI 18 t`).
     Response(Vec<u8>),
-    /// Application sent `CSI 8 ; rows ; cols t` — keep the PTY winsize in sync (htop).
+    /// Reserved: application `CSI 8` window resize (not used; rsterm owns geometry).
+    #[allow(dead_code)]
     PtyResize { rows: usize, cols: usize },
 }
 

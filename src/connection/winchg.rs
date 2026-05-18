@@ -1,7 +1,7 @@
 //! Notify the foreground process group on a PTY that the terminal size changed.
 
 #[cfg(unix)]
-pub fn signal_winch_to_pty_foreground(master_fd: i32) {
+pub fn signal_winch(master_fd: i32, shell_pid: Option<u32>) {
     if master_fd < 0 {
         return;
     }
@@ -13,7 +13,16 @@ pub fn signal_winch_to_pty_foreground(master_fd: i32) {
             libc::kill(-pgid, libc::SIGWINCH);
         }
     }
+    #[cfg(target_os = "linux")]
+    if let Some(shell) = shell_pid {
+        if let Some(fg) = crate::platform::foreground_process_pid(shell) {
+            // Belt-and-suspenders: some setups only deliver SIGWINCH to the leaf process.
+            unsafe {
+                libc::kill(fg as i32, libc::SIGWINCH);
+            }
+        }
+    }
 }
 
 #[cfg(not(unix))]
-pub fn signal_winch_to_pty_foreground(_master_fd: i32) {}
+pub fn signal_winch(_master_fd: i32, _shell_pid: Option<u32>) {}

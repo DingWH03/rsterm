@@ -1,7 +1,8 @@
 use std::io::{Read, Write};
 use std::sync::mpsc;
+use std::time::Duration;
 
-use portable_pty::{CommandBuilder, PtySize};
+use portable_pty::{CommandBuilder, MasterPty, PtySize};
 
 use crate::connection::{
     emit_conn_data, pty_burst, winchg, ConnIn, ConnOut, ConnectionHandle, ConnectionState,
@@ -9,6 +10,28 @@ use crate::connection::{
 };
 use crate::settings::Profile;
 use crate::storage::types::SavedConnection;
+
+fn pty_size(rows: u16, cols: u16) -> PtySize {
+    PtySize {
+        rows: rows.max(1),
+        cols: cols.max(1),
+        pixel_width: cols.max(1).saturating_mul(8),
+        pixel_height: rows.max(1).saturating_mul(16),
+    }
+}
+
+fn apply_pty_resize(
+    master: &dyn MasterPty,
+    rows: u16,
+    cols: u16,
+    shell_pid: Option<u32>,
+) {
+    if master.resize(pty_size(rows, cols)).is_ok() {
+        if let Some(fd) = master.as_raw_fd() {
+            winchg::signal_winch(fd, shell_pid);
+        }
+    }
+}
 
 pub fn connect_local(
     config: &SavedConnection,
@@ -18,6 +41,7 @@ pub fn connect_local(
 ) -> Result<ConnectionHandle, String> {
     let (to_conn_tx, to_conn_rx) = mpsc::channel::<ConnOut>();
     let (from_conn_tx, from_conn_rx) = mpsc::channel::<ConnIn>();
+    let (blocking_resize_tx, blocking_resize_rx) = mpsc::sync_channel::<(u16, u16)>(0);
 
     let shell = config
         .shell
@@ -26,12 +50,7 @@ pub fn connect_local(
 
     let sys = portable_pty::native_pty_system();
     let pair = sys
-        .openpty(PtySize {
-            rows: rows.max(1),
-            cols: cols.max(1),
-            pixel_width: 0,
-            pixel_height: 0,
-        })
+        .openpty(pty_size(rows, cols))
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
     let mut cmd = CommandBuilder::new(&shell);
@@ -53,6 +72,8 @@ pub fn connect_local(
         .slave
         .spawn_command(cmd)
         .map_err(|e| format!("Failed to spawn command: {e}"))?;
+
+    let shell_pid = child.process_id();
 
     drop(pair.slave);
 
@@ -92,7 +113,15 @@ pub fn connect_local(
     let writer_from_tx = from_conn_tx;
     let writer_thread = std::thread::spawn(move || {
         loop {
-            match to_conn_rx.recv() {
+            match blocking_resize_rx.recv_timeout(Duration::from_millis(10)) {
+                Ok((rows, cols)) => {
+                    apply_pty_resize(&*master, rows, cols, shell_pid);
+                    continue;
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+            match to_conn_rx.recv_timeout(Duration::from_millis(10)) {
                 Ok(ConnOut::Data(data)) => {
                     if writer.write_all(&data).is_err() {
                         let _ = writer_from_tx.send(ConnIn::StateChanged(ConnectionState::Disconnected));
@@ -101,30 +130,26 @@ pub fn connect_local(
                     let _ = writer.flush();
                 }
                 Ok(ConnOut::Resize(rows, cols)) => {
-                    let size = PtySize {
-                        rows: rows.max(1),
-                        cols: cols.max(1),
-                        // Non-zero pixels help some ncurses apps pick a sane geometry on SIGWINCH.
-                        pixel_width: cols.max(1).saturating_mul(8),
-                        pixel_height: rows.max(1).saturating_mul(16),
-                    };
-                    if master.resize(size).is_ok() {
-                        if let Some(fd) = master.as_raw_fd() {
-                            winchg::signal_winch_to_pty_foreground(fd);
-                        }
+                    apply_pty_resize(&*master, rows, cols, shell_pid);
+                }
+                Ok(ConnOut::Winch) => {
+                    if let Some(fd) = master.as_raw_fd() {
+                        winchg::signal_winch(fd, shell_pid);
                     }
                 }
                 Ok(ConnOut::Close) => {
                     let _ = writer_from_tx.send(ConnIn::StateChanged(ConnectionState::Disconnected));
                     return;
                 }
-                Err(_) => return,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
             }
         }
     });
 
     Ok(
         ConnectionHandle::new(to_conn_tx, from_conn_rx, reader_thread, writer_thread, repaint)
-            .with_pty_child(child),
+            .with_pty_child(child)
+            .with_blocking_resize(blocking_resize_tx),
     )
 }

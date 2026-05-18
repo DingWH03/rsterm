@@ -141,6 +141,7 @@ impl RstermApp {
             ),
             size_label_hide_at: None,
             size_label_active: false,
+            alt_resize_drain_frames: 0,
         });
     }
 
