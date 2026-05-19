@@ -8,13 +8,14 @@ pub struct TerminalSidebarAction {
     pub close_session: Option<String>,
     pub new_window_session: Option<String>,
     pub go_home: bool,
-    pub settings_open: bool,
+    /// User tapped Settings in the sidebar (app chooses full page vs side panel).
+    pub settings_toggled: bool,
 }
 
 pub fn terminal_sidebar(
     ui: &mut egui::Ui,
     sidebar: &mut Sidebar,
-    settings_open: &mut bool,
+    on_settings: bool,
     sessions: &[WorkspaceSession],
     active_id: Option<&str>,
 ) -> TerminalSidebarAction {
@@ -23,7 +24,7 @@ pub fn terminal_sidebar(
         close_session: None,
         new_window_session: None,
         go_home: false,
-        settings_open: *settings_open,
+        settings_toggled: false,
     };
 
     let show_ham = sidebar.show_panel_hamburger(SidebarPage::Workspace);
@@ -37,16 +38,14 @@ pub fn terminal_sidebar(
     {
         action.go_home = true;
     }
-    let settings_sel = *settings_open;
     if ui
         .selectable_label(
-            settings_sel,
+            on_settings,
             egui::RichText::new("\u{2699}  Settings").size(14.0),
         )
         .clicked()
     {
-        *settings_open = !*settings_open;
-        action.settings_open = *settings_open;
+        action.settings_toggled = true;
     }
 
     ui.add_space(4.0);

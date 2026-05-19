@@ -34,11 +34,11 @@ pub fn home_screen(
         local_body.context_menu(|ui| {
             if ui.button("Connect").clicked() {
                 *local_clicked = true;
-                ui.close_menu();
+                ui.close();
             }
             if ui.button("File Manager").clicked() {
                 card_menu.local_fm = true;
-                ui.close_menu();
+                ui.close();
             }
         });
         ui.add_space(8.0);
@@ -78,21 +78,21 @@ pub fn home_screen(
                     card.context_menu(|ui| {
                         if ui.button("Connect").clicked() {
                             *connect_clicked = Some(conn.id.clone());
-                            ui.close_menu();
+                            ui.close();
                         }
                         if ui.button("Edit").clicked() {
                             *edit_clicked = Some(conn.id.clone());
-                            ui.close_menu();
+                            ui.close();
                         }
                         if conn.conn_type == ConnectionType::Ssh
                             && ui.button("Remote Files").clicked()
                         {
                             *sftp_clicked = Some(conn.id.clone());
-                            ui.close_menu();
+                            ui.close();
                         }
                         if ui.button("Delete").clicked() {
                             to_delete = Some(i);
-                            ui.close_menu();
+                            ui.close();
                         }
                     });
 
@@ -117,7 +117,7 @@ pub fn home_screen(
     }
     let painter = ui.painter_at(fab_rect);
     painter.circle_filled(fab_rect.center(), fab_size / 2.0, egui::Color32::from_rgb(33, 150, 243));
-    let galley = ui.fonts(|f| {
+    let galley = ui.fonts_mut(|f| {
         f.layout(
             "+".to_string(),
             egui::FontId::proportional(26.0),
@@ -203,7 +203,7 @@ fn icon_color(resp: &egui::Response) -> egui::Color32 {
 }
 
 fn paint_icon(ui: &egui::Ui, rect: egui::Rect, icon: &str, color: egui::Color32) {
-    let galley = ui.fonts(|f| {
+    let galley = ui.fonts_mut(|f| {
         f.layout(
             icon.to_string(),
             egui::FontId::proportional(ICON_FONT),
@@ -281,7 +281,7 @@ fn render_local_terminal_card(
         let toolbar = CardToolbar::layout(rect, true, false);
         let _text_right = rect.right() - CardToolbar::reserved_width(true, false);
 
-        let icon = ui.fonts(|f| {
+        let icon = ui.fonts_mut(|f| {
             f.layout(
                 "\u{1F4BB}".to_string(),
                 egui::FontId::proportional(22.0),
@@ -294,7 +294,7 @@ fn render_local_terminal_card(
             icon,
             egui::Color32::WHITE,
         );
-        let name = ui.fonts(|f| {
+        let name = ui.fonts_mut(|f| {
             f.layout(
                 "Local Terminal".to_string(),
                 egui::FontId::proportional(16.0),
@@ -307,7 +307,7 @@ fn render_local_terminal_card(
             name,
             egui::Color32::WHITE,
         );
-        let sub = ui.fonts(|f| {
+        let sub = ui.fonts_mut(|f| {
             f.layout(
                 "Open a local shell session".to_string(),
                 egui::FontId::proportional(13.0),
@@ -367,7 +367,7 @@ fn render_connection_card(
         let toolbar = CardToolbar::layout(rect, show_file, true);
         let _text_right = rect.right() - CardToolbar::reserved_width(show_file, true);
 
-        let icon = ui.fonts(|f| {
+        let icon = ui.fonts_mut(|f| {
             f.layout(
                 conn.conn_type.icon().to_string(),
                 egui::FontId::proportional(22.0),
@@ -380,7 +380,7 @@ fn render_connection_card(
             icon,
             egui::Color32::WHITE,
         );
-        let name = ui.fonts(|f| {
+        let name = ui.fonts_mut(|f| {
             f.layout(
                 conn.name.clone(),
                 egui::FontId::proportional(15.0),
@@ -393,7 +393,7 @@ fn render_connection_card(
             name,
             ui.style().visuals.text_color(),
         );
-        let sub = ui.fonts(|f| {
+        let sub = ui.fonts_mut(|f| {
             f.layout(
                 conn.conn_type.label().to_string(),
                 egui::FontId::proportional(13.0),

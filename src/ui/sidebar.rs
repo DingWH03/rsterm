@@ -86,7 +86,7 @@ impl Sidebar {
 
     /// Dimmed backdrop; returns `true` if the user tapped outside the panel.
     pub fn overlay_backdrop_clicked(ctx: &egui::Context, backdrop_id: egui::Id) -> bool {
-        let rect = ctx.screen_rect();
+        let rect = ctx.content_rect();
         let mut clicked = false;
         egui::Area::new(backdrop_id)
             .order(egui::Order::Background)
@@ -105,7 +105,7 @@ impl Sidebar {
     where
         F: FnMut(&mut egui::Ui),
     {
-        let rect = ctx.screen_rect();
+        let rect = ctx.content_rect();
         let w = OVERLAY_WIDTH;
         egui::Area::new(egui::Id::new(panel_id))
             .order(egui::Order::Foreground)

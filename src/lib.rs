@@ -58,6 +58,9 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
         android_logger::Config::default().with_max_level(log::LevelFilter::Info),
     );
 
+    platform::init_android_ime(app.clone());
+    platform::ensure_storage_access(&app);
+
     let native_options = eframe::NativeOptions {
         android_app: Some(app),
         viewport: egui::ViewportBuilder::default()

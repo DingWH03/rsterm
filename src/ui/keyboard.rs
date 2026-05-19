@@ -21,6 +21,7 @@ enum KeyAction {
     Shift,
     Symbols,
     Fn,
+    Ctrl,
     Space,
     Enter,
     FKey(u8),
@@ -45,8 +46,12 @@ pub struct VirtualKeyboard {
     pub visible: bool,
     pub mode: KeyboardMode,
     shift: bool,
+    ctrl: bool,
     show_fn: bool,
     layer: Layer,
+    /// Android system IME is active: virtual keyboard is limited to function keys only.
+    #[cfg(target_os = "android")]
+    pub android_ime_on: bool,
 }
 
 impl VirtualKeyboard {
@@ -55,16 +60,56 @@ impl VirtualKeyboard {
             visible: false,
             mode,
             shift: false,
+            ctrl: false,
             show_fn: false,
             layer: Layer::Alpha,
+            #[cfg(target_os = "android")]
+            android_ime_on: false,
         }
+    }
+
+    /// Layout mode used for sizing and painting (IME on Android ⇒ function keys only).
+    pub fn effective_mode(&self) -> KeyboardMode {
+        #[cfg(target_os = "android")]
+        if self.android_ime_on {
+            return KeyboardMode::Special;
+        }
+        self.mode
+    }
+
+    #[cfg(target_os = "android")]
+    pub fn set_android_ime_on(&mut self, on: bool) {
+        self.android_ime_on = on;
+        if on {
+            self.mode = KeyboardMode::Special;
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    pub fn toggle_android_ime_on(&mut self) -> bool {
+        self.set_android_ime_on(!self.android_ime_on);
+        self.android_ime_on
+    }
+
+    /// Sticky Ctrl from the on-screen keyboard (used with system IME on Android).
+    pub fn ctrl_active(&self) -> bool {
+        self.ctrl
     }
 
     pub fn toggle(&mut self) {
         self.visible = !self.visible;
+        #[cfg(target_os = "android")]
+        if self.visible && self.android_ime_on {
+            self.mode = KeyboardMode::Special;
+        }
     }
 
     pub fn toggle_mode(&mut self) {
+        #[cfg(target_os = "android")]
+        if self.android_ime_on {
+            self.mode = KeyboardMode::Special;
+            return;
+        }
         self.mode = match self.mode {
             KeyboardMode::Special => KeyboardMode::Full,
             KeyboardMode::Full => KeyboardMode::Special,
@@ -81,7 +126,7 @@ impl VirtualKeyboard {
 
     /// Keyboard body height only (must match rows drawn in `show_*`).
     pub fn content_height(&self, avail_w: f32) -> f32 {
-        let compact = self.mode == KeyboardMode::Full;
+        let compact = self.effective_mode() == KeyboardMode::Full;
         let m = KeyMetrics::for_width(avail_w, self.layout_row_units(), compact);
         let row = m.row_pixel_height();
         let n = self.row_count() as f32;
@@ -89,8 +134,15 @@ impl VirtualKeyboard {
     }
 
     fn row_count(&self) -> u32 {
-        match self.mode {
-            KeyboardMode::Special => 2,
+        match self.effective_mode() {
+            KeyboardMode::Special => {
+                2 + u32::from(
+                    #[cfg(target_os = "android")]
+                    self.android_ime_on,
+                    #[cfg(not(target_os = "android"))]
+                    false,
+                )
+            }
             KeyboardMode::Full => {
                 let main_rows = match self.layer {
                     Layer::Alpha => 3,
@@ -104,13 +156,13 @@ impl VirtualKeyboard {
     const SEPARATOR_ABOVE: f32 = 6.0;
 
     fn layout_row_units(&self) -> f32 {
-        match self.mode {
-            KeyboardMode::Special => 13.0,
+        match self.effective_mode() {
+            KeyboardMode::Special => 14.0,
             KeyboardMode::Full => {
                 if self.layer == Layer::Symbols {
                     12.0
                 } else {
-                    13.5
+                    15.0
                 }
             }
         }
@@ -120,7 +172,7 @@ impl VirtualKeyboard {
         if !self.visible {
             return Vec::new();
         }
-        match self.mode {
+        match self.effective_mode() {
             KeyboardMode::Special => self.show_special(ui),
             KeyboardMode::Full => self.show_full(ui),
         }
@@ -161,7 +213,7 @@ impl VirtualKeyboard {
     fn show_special(&mut self, ui: &mut egui::Ui) -> Vec<Vec<u8>> {
         let mut output = Vec::new();
         let avail = ui.available_width();
-        let m = KeyMetrics::for_width(avail, 13.0, false);
+        let m = KeyMetrics::for_width(avail, 14.0, false);
         ui.spacing_mut().item_spacing = egui::vec2(m.gap, m.row_gap);
 
         let row1 = [
@@ -182,8 +234,9 @@ impl VirtualKeyboard {
         self.paint_row(ui, &m, &row1, &mut output);
 
         let row2 = [
-            key("Tab", KeyAction::Bytes(b"\t"), 1.15),
-            key("⌫", KeyAction::Bytes(b"\x7f"), 1.15),
+            key("Tab", KeyAction::Bytes(b"\t"), 1.1),
+            key("Ctrl", KeyAction::Ctrl, 1.1),
+            key("⌫", KeyAction::Bytes(b"\x7f"), 1.1),
             key("Del", KeyAction::Bytes(b"\x1b[3~"), 1.1),
             key("Ins", KeyAction::Bytes(b"\x1b[2~"), 1.1),
             key("↑", KeyAction::Bytes(b"\x1b[A"), 1.0),
@@ -197,6 +250,19 @@ impl VirtualKeyboard {
             key("↵", KeyAction::Bytes(b"\r"), 1.15),
         ];
         self.paint_row(ui, &m, &row2, &mut output);
+
+        #[cfg(target_os = "android")]
+        if self.android_ime_on {
+            let m3 = KeyMetrics::for_width(avail, 8.0, false);
+            let row3 = [
+                key("^C", KeyAction::Bytes(b"\x03"), 1.0),
+                key("^D", KeyAction::Bytes(b"\x04"), 1.0),
+                key("^Z", KeyAction::Bytes(b"\x1a"), 1.0),
+                key("^L", KeyAction::Bytes(b"\x0c"), 1.0),
+            ];
+            self.paint_row(ui, &m3, &row3, &mut output);
+        }
+
         output
     }
 
@@ -245,11 +311,10 @@ impl VirtualKeyboard {
         let a_row = ["a", "s", "d", "f", "g", "h", "j", "k", "l"];
         self.paint_letter_row(ui, m, 1.0, &a_row, output);
 
-        let mut z_row = vec![key(
-            if self.shift { "⇧✓" } else { "⇧" },
-            KeyAction::Shift,
-            1.35,
-        )];
+        let mut z_row = vec![
+            key("Ctrl", KeyAction::Ctrl, 1.2),
+            key(if self.shift { "⇧✓" } else { "⇧" }, KeyAction::Shift, 1.2),
+        ];
         for c in ["z", "x", "c", "v", "b", "n", "m"] {
             let label = letter_label(c, self.shift);
             z_row.push(key(label, KeyAction::Text, 1.0));
@@ -258,7 +323,8 @@ impl VirtualKeyboard {
         self.paint_row(ui, m, &z_row, output);
 
         let bottom = [
-            key("#+=", KeyAction::Symbols, 1.2),
+            key("Tab", KeyAction::Bytes(b"\t"), 1.0),
+            key("#+=", KeyAction::Symbols, 1.1),
             key(",", KeyAction::Text, 1.0),
             key(".", KeyAction::Text, 1.0),
             key("/", KeyAction::Text, 1.0),
@@ -298,7 +364,9 @@ impl VirtualKeyboard {
         self.paint_row(ui, m, &row2, output);
 
         let bottom = [
-            key("ABC", KeyAction::Symbols, 1.2),
+            key("Tab", KeyAction::Bytes(b"\t"), 1.0),
+            key("Ctrl", KeyAction::Ctrl, 1.1),
+            key("ABC", KeyAction::Symbols, 1.1),
             key("[", KeyAction::Text, 1.0),
             key("]", KeyAction::Text, 1.0),
             key(":", KeyAction::Text, 1.0),
@@ -331,7 +399,7 @@ impl VirtualKeyboard {
             for c in letters {
                 let label = letter_label(c, shift);
                 if paint_button(ui, label, m.key_w, m.key_h, m.font_size, false) {
-                    output.push(label.as_bytes().to_vec());
+                    self.emit_text_label(label, output);
                 }
             }
         });
@@ -368,17 +436,33 @@ impl VirtualKeyboard {
     fn paint_key(&self, ui: &mut egui::Ui, m: &KeyMetrics, kd: &KeyDef) -> bool {
         let w = m.key_w * kd.width;
         let active = matches!(kd.action, KeyAction::Shift if self.shift)
+            || matches!(kd.action, KeyAction::Ctrl if self.ctrl)
             || matches!(kd.action, KeyAction::Fn if self.show_fn)
             || (matches!(kd.action, KeyAction::Symbols) && self.layer == Layer::Symbols);
         paint_button(ui, kd.label, w, m.key_h, m.font_size, active)
     }
 
+    /// Send one text key label (letters, punctuation) honoring sticky Ctrl.
+    fn emit_text_label(&mut self, label: &str, output: &mut Vec<Vec<u8>>) {
+        if self.ctrl {
+            if let Some(ch) = label.chars().next()
+                && label.chars().nth(1).is_none()
+                && let Some(byte) = ctrl_byte_for_char(ch)
+            {
+                output.push(vec![byte]);
+                return;
+            }
+        }
+        output.push(label.as_bytes().to_vec());
+    }
+
     fn emit_key(&mut self, kd: &KeyDef, output: &mut Vec<Vec<u8>>) {
         match kd.action {
             KeyAction::Bytes(bytes) => output.push(bytes.to_vec()),
-            KeyAction::Text => output.push(kd.label.as_bytes().to_vec()),
+            KeyAction::Text => self.emit_text_label(kd.label, output),
             KeyAction::FKey(n) => output.push(fkey_seq(n)),
             KeyAction::Shift => self.shift = !self.shift,
+            KeyAction::Ctrl => self.ctrl = !self.ctrl,
             KeyAction::Symbols => {
                 self.layer = match self.layer {
                     Layer::Alpha => Layer::Symbols,
@@ -430,11 +514,18 @@ fn paint_button(
 ) -> bool {
     let visuals = ui.visuals();
     let fill = if active {
-        visuals.widgets.hovered.bg_fill
+        visuals.widgets.active.bg_fill
     } else {
         visuals.widgets.inactive.bg_fill
     };
-    let btn = egui::Button::new(egui::RichText::new(label).size(font_size).monospace()).fill(fill);
+    let stroke = if active {
+        visuals.widgets.active.bg_stroke
+    } else {
+        visuals.widgets.inactive.bg_stroke
+    };
+    let btn = egui::Button::new(egui::RichText::new(label).size(font_size).monospace())
+        .fill(fill)
+        .stroke(stroke);
     ui.add_sized(egui::vec2(w, h), btn).clicked()
 }
 
@@ -510,6 +601,33 @@ fn digit_label(n: u8, layer: Layer, shift: bool) -> &'static str {
         SHIFTED[i]
     } else {
         DIGITS[i]
+    }
+}
+
+/// Map one character to a control byte when Ctrl is held (e.g. `c` → ETX).
+pub fn ctrl_byte_for_char(c: char) -> Option<u8> {
+    match c {
+        'a'..='z' => Some(c as u8 - b'a' + 1),
+        'A'..='Z' => Some(c as u8 - b'A' + 1),
+        '@' => Some(0),
+        '[' => Some(27),
+        '\\' => Some(28),
+        ']' => Some(29),
+        '^' => Some(30),
+        '_' => Some(31),
+        ' ' => Some(0),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ctrl_mapping() {
+        assert_eq!(ctrl_byte_for_char('c'), Some(0x03));
+        assert_eq!(ctrl_byte_for_char('D'), Some(0x04));
     }
 }
 

@@ -140,7 +140,7 @@ fn paint_session_label(
     let hover_fill = ui.visuals().widgets.hovered.bg_fill;
     let hover_radius = ui.visuals().widgets.hovered.corner_radius;
 
-    let galley = ui.fonts(|f| {
+    let galley = ui.fonts_mut(|f| {
         f.layout(
             text.to_owned(),
             font_id.clone(),
@@ -172,7 +172,7 @@ fn paint_session_label(
 
     // Slightly over budget: static ellipsis (no animation cost).
     let ellipsis_w = ui
-        .fonts(|f| {
+        .fonts_mut(|f| {
             f.layout(
                 "…".to_owned(),
                 font_id.clone(),
@@ -196,7 +196,7 @@ fn paint_session_label(
         );
         painter.galley(
             dots,
-            ui.fonts(|f| {
+            ui.fonts_mut(|f| {
                 f.layout("…".into(), font_id, text_color, f32::INFINITY)
             }),
             text_color,
@@ -233,11 +233,11 @@ fn truncate_galley_to_width(
     let mut end = chars.len();
     while end > 0 {
         let s: String = chars[..end].iter().collect();
-        let g = ui.fonts(|f| f.layout(s, font_id.clone(), color, f32::INFINITY));
+        let g = ui.fonts_mut(|f| f.layout(s, font_id.clone(), color, f32::INFINITY));
         if g.size().x <= max_w {
             return g;
         }
         end -= 1;
     }
-    ui.fonts(|f| f.layout(String::new(), font_id.clone(), color, f32::INFINITY))
+    ui.fonts_mut(|f| f.layout(String::new(), font_id.clone(), color, f32::INFINITY))
 }

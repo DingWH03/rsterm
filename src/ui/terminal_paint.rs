@@ -162,12 +162,8 @@ pub fn paint_row(
 
         if cell.ch != ' ' {
             let galley = layout_glyph(ui, cache, font_id, font_size, theme, cell.ch, attrs);
-            let cell_pixel_w = cell_w * span as f32;
-            let glyph_w = galley.size().x;
-            let x_paint = x + ((cell_pixel_w - glyph_w).max(0.0) * 0.5);
-            painter
-                .with_clip_rect(cell_rect)
-                .galley(egui::pos2(x_paint, y), galley, egui::Color32::WHITE);
+            let (fg, _) = resolve_colors(theme, attrs);
+            paint_glyph_at(&painter, galley, cell_rect, fg);
         } else if attrs.underline {
             // Highlight plugins may underline spaces in a command span.
             let (_, bg) = resolve_colors(theme, attrs);
@@ -264,8 +260,30 @@ fn text_format(font_id: FontId, fg: egui::Color32, bg: egui::Color32, attrs: Run
         italics: attrs.italic,
         underline: Stroke::NONE,
         strikethrough: if attrs.strikethrough { stroke } else { Stroke::NONE },
-        valign: Align::TOP,
+        valign: Align::Center,
         ..Default::default()
+    }
+}
+
+fn paint_glyph_at(
+    painter: &Painter,
+    galley: std::sync::Arc<Galley>,
+    cell_rect: egui::Rect,
+    fg: egui::Color32,
+) {
+    let glyph_w = galley.size().x;
+    let glyph_h = galley.size().y;
+    let x_paint = cell_rect.left() + ((cell_rect.width() - glyph_w).max(0.0) * 0.5);
+    let y_paint = cell_rect.top() + ((cell_rect.height() - glyph_h).max(0.0) * 0.5);
+    #[cfg(target_os = "android")]
+    {
+        painter.galley(egui::pos2(x_paint, y_paint), galley, fg);
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        painter
+            .with_clip_rect(cell_rect)
+            .galley(egui::pos2(x_paint, y_paint), galley, fg);
     }
 }
 
@@ -288,7 +306,7 @@ fn layout_glyph(
     let mut utf8 = [0u8; 4];
     let ch_str = ch.encode_utf8(&mut utf8);
     let job = LayoutJob::single_section(ch_str.to_owned(), format);
-    let galley = ui.fonts(|f| f.layout_job(job));
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
     cache.insert(key, galley.clone());
     galley
 }

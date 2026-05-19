@@ -10,7 +10,8 @@ use crate::ui::clipboard::{read_text, write_text};
 use crate::ui::keyboard::VirtualKeyboard;
 use crate::ui::sidebar::{Sidebar, SidebarPage};
 use crate::ui::terminal_input::{
-    allocate_terminal_surface, lock_terminal_focus, process_keyboard_input, terminal_widget_id,
+    allocate_terminal_surface, lock_terminal_focus, process_keyboard_input,
+    sync_android_soft_input, terminal_widget_id,
 };
 use crate::ui::terminal_paint::{paint_row, RowGalleyCache};
 use crate::ui::terminal_mouse::{process_terminal_mouse, process_terminal_wheel};
@@ -93,7 +94,6 @@ pub fn connection_view(
     theme: &TerminalTheme,
     font_size: &mut f32,
     sidebar: &mut Sidebar,
-    settings_open: &mut bool,
 ) -> ConnectionViewAction {
     let ctx = ui.ctx().clone();
     let mut action = ConnectionViewAction::None;
@@ -119,16 +119,6 @@ pub fn connection_view(
         ui.label(egui::RichText::new(title).size(14.0).strong());
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let settings_active = *settings_open;
-            let settings_label = if settings_active {
-                "\u{2699}\u{FE0F}"
-            } else {
-                "\u{2699}"
-            };
-            if toolbar_button(ui, settings_label).clicked() {
-                *settings_open = !*settings_open;
-            }
-
             // Font size quick controls
             if toolbar_button(ui, "A-").clicked() {
                 *font_size = (*font_size - 1.0).max(8.0);
@@ -142,13 +132,43 @@ pub fn connection_view(
             let kb_icon = if keyboard.visible { "⌨✓" } else { "⌨" };
             if toolbar_button(ui, kb_icon).clicked() {
                 keyboard.toggle();
+                #[cfg(target_os = "android")]
+                if keyboard.visible && !keyboard.android_ime_on {
+                    sync_android_soft_input(ui.ctx(), false, egui::Rect::NOTHING);
+                }
             }
-            let mode_label = match keyboard.mode {
-                crate::ui::keyboard::KeyboardMode::Special => "Sp",
-                crate::ui::keyboard::KeyboardMode::Full => "Full",
-            };
-            if toolbar_button(ui, mode_label).clicked() {
-                keyboard.toggle_mode();
+            #[cfg(target_os = "android")]
+            {
+                let ime_label = if keyboard.android_ime_on {
+                    "IME✓"
+                } else {
+                    "IME"
+                };
+                if toolbar_button(ui, ime_label).clicked() {
+                    let on = keyboard.toggle_android_ime_on();
+                    if on {
+                        if let Some(session) = session.as_mut() {
+                            session.want_terminal_focus = true;
+                        }
+                    }
+                }
+            }
+            #[cfg(not(target_os = "android"))]
+            let show_mode_toggle = true;
+            #[cfg(target_os = "android")]
+            let show_mode_toggle = !keyboard.android_ime_on;
+            if show_mode_toggle {
+                let mode_label = match keyboard.mode {
+                    crate::ui::keyboard::KeyboardMode::Special => "Sp",
+                    crate::ui::keyboard::KeyboardMode::Full => "Full",
+                };
+                if toolbar_button(ui, mode_label).clicked() {
+                    keyboard.toggle_mode();
+                }
+            }
+            #[cfg(target_os = "android")]
+            if keyboard.android_ime_on && keyboard.visible {
+                ui.label(egui::RichText::new("Fn").size(12.0).weak());
             }
 
             if toolbar_button(ui, egui::RichText::new("✕").size(14.0).color(egui::Color32::RED)).clicked() {
@@ -161,9 +181,17 @@ pub fn connection_view(
     // 2. Measure and resize terminal
     renderer.font_size = *font_size;
     let available = ui.available_size();
+    #[cfg(target_os = "android")]
+    let ime_inset = if keyboard.android_ime_on {
+        crate::platform::bottom_inset_points(ui.ctx())
+    } else {
+        0.0
+    };
+    #[cfg(not(target_os = "android"))]
+    let ime_inset = 0.0;
     let kb_total = keyboard.reserved_height(available.x);
     let term_w = available.x;
-    let term_h = (available.y - kb_total).max(1.0);
+    let term_h = (available.y - kb_total - ime_inset).max(1.0);
 
     let (cell_w, cell_h) = TerminalRenderer::measure_cell(ui, *font_size);
     let desired_cols = (term_w / cell_w).floor().max(1.0) as usize;
@@ -276,6 +304,11 @@ pub fn connection_view(
     term_resp = term_resp.on_hover_cursor(egui::CursorIcon::Text);
     if term_resp.clicked() {
         term_resp.request_focus();
+        #[cfg(target_os = "android")]
+        {
+            keyboard.set_android_ime_on(true);
+            sync_android_soft_input(ui.ctx(), true, grid_rect);
+        }
     }
     if session.as_ref().is_some_and(|s| s.want_terminal_focus) {
         ui.ctx().memory_mut(|mem| mem.request_focus(terminal_widget_id()));
@@ -301,6 +334,7 @@ pub fn connection_view(
         term_focused,
         has_selection,
         modifiers,
+        keyboard.ctrl_active(),
         app_cursor_keys,
         &mut copy_requested,
         &mut pending_input,
@@ -342,11 +376,11 @@ pub fn connection_view(
                     session.selection_pointer = None;
                 }
             }
-            ui.close_menu();
+            ui.close();
         }
         if ui.button("Paste").clicked() {
             context_menu_paste = true;
-            ui.close_menu();
+            ui.close();
         }
     });
 
@@ -450,11 +484,23 @@ pub fn connection_view(
 
             let offset = session.scroll_offset;
 
+            let row_y = |row: usize| -> f32 {
+                let y = grid_rect.top() + row as f32 * cell_h;
+                #[cfg(target_os = "android")]
+                {
+                    y.round()
+                }
+                #[cfg(not(target_os = "android"))]
+                {
+                    y
+                }
+            };
+
             for row in 0..grid_rows {
                 if row < offset {
                     let line_index = offset - 1 - row;
                     if let Some(cells) = screen.scrollback_row(line_index) {
-                        let y = grid_rect.top() + row as f32 * cell_h;
+                        let y = row_y(row);
                         paint_row(
                             &painter,
                             ui,
@@ -473,7 +519,7 @@ pub fn connection_view(
                 } else {
                     let screen_row = row - offset;
                     if screen_row < screen.rows {
-                        let y = grid_rect.top() + row as f32 * cell_h;
+                        let y = row_y(row);
                         let cells = &screen.cells[screen_row];
                         paint_row(
                             &painter,
@@ -598,6 +644,16 @@ pub fn connection_view(
     }
     if term_resp.has_focus() {
         lock_terminal_focus(ui.ctx());
+    }
+    #[cfg(target_os = "android")]
+    if term_focused {
+        sync_android_soft_input(
+            ui.ctx(),
+            keyboard.android_ime_on,
+            grid_rect,
+        );
+    } else {
+        sync_android_soft_input(ui.ctx(), false, egui::Rect::NOTHING);
     }
 
     action

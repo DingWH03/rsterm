@@ -146,7 +146,7 @@ impl NewConnectionDialog {
                             text = text.strong().color(egui::Color32::from_rgb(33, 150, 243));
                         }
                         if ui
-                            .add_enabled(!editing, egui::SelectableLabel::new(selected, text))
+                            .add_enabled(!editing, egui::Button::selectable(selected, text))
                             .clicked()
                         {
                             if self.conn_type != ct {

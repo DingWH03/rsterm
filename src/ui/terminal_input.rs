@@ -3,6 +3,7 @@
 use egui::{Context, Event, EventFilter, Id, Key, Modifiers, Sense, Ui, Vec2};
 
 use crate::ui::clipboard::read_text;
+use crate::ui::keyboard::ctrl_byte_for_char;
 
 /// Stable focus id (must not depend on parent `Ui` id).
 pub fn terminal_widget_id() -> Id {
@@ -40,6 +41,22 @@ pub fn allocate_terminal_surface(
     (panel_rect, grid_rect, response)
 }
 
+/// Show/hide the Android soft keyboard (winit maps `IMEAllowed` → `show_soft_input`).
+#[cfg(target_os = "android")]
+pub fn sync_android_soft_input(ctx: &Context, enable: bool, ime_area: egui::Rect) {
+    use egui::viewport::{IMEPurpose, ViewportCommand};
+    if enable {
+        ctx.send_viewport_cmd(ViewportCommand::IMERect(ime_area));
+        ctx.send_viewport_cmd(ViewportCommand::IMEPurpose(IMEPurpose::Terminal));
+        ctx.send_viewport_cmd(ViewportCommand::IMEAllowed(true));
+    } else {
+        ctx.send_viewport_cmd(ViewportCommand::IMEAllowed(false));
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+pub fn sync_android_soft_input(_ctx: &Context, _enable: bool, _ime_area: egui::Rect) {}
+
 /// Keep arrow/tab/escape on the terminal (egui focus navigation runs in `begin_pass`).
 pub fn lock_terminal_focus(ctx: &Context) {
     ctx.memory_mut(|mem| {
@@ -53,6 +70,7 @@ pub fn process_keyboard_input(
     term_focused: bool,
     has_selection: bool,
     modifiers: Modifiers,
+    virtual_ctrl: bool,
     app_cursor_keys: bool,
     copy_requested: &mut bool,
     pending_input: &mut Vec<Vec<u8>>,
@@ -99,7 +117,29 @@ pub fn process_keyboard_input(
                     false
                 }
                 Event::Text(text) => {
-                    if !text.as_bytes().iter().any(|&b| b < 0x20 || b == 0x7f) {
+                    let ctrl = modifiers.ctrl || modifiers.command || virtual_ctrl;
+                    if ctrl {
+                        let mut bytes = Vec::new();
+                        for c in text.chars() {
+                            if (c == 'c' || c == 'C')
+                                && has_selection
+                                && !modifiers.shift
+                            {
+                                *copy_requested = true;
+                                continue;
+                            }
+                            if let Some(b) = ctrl_byte_for_char(c) {
+                                bytes.push(b);
+                            }
+                        }
+                        if !bytes.is_empty() {
+                            pending_input.push(bytes);
+                        }
+                    } else if !text
+                        .as_bytes()
+                        .iter()
+                        .any(|&b| b < 0x20 || b == 0x7f)
+                    {
                         pending_input.push(text.as_bytes().to_vec());
                     }
                     false

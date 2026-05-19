@@ -21,9 +21,32 @@ impl FileEntry {
 }
 
 pub fn home_dir() -> PathBuf {
-    directories::UserDirs::new()
-        .map(|u| u.home_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("/"))
+    #[cfg(target_os = "android")]
+    {
+        return android_external_home();
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        directories::UserDirs::new()
+            .map(|u| u.home_dir().to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("/"))
+    }
+}
+
+/// Primary shared storage root on Android (needs storage / all-files permission).
+#[cfg(target_os = "android")]
+fn android_external_home() -> PathBuf {
+    for candidate in [
+        "/storage/emulated/0",
+        "/sdcard",
+        "/storage/self/primary",
+    ] {
+        let p = PathBuf::from(candidate);
+        if p.is_dir() {
+            return p;
+        }
+    }
+    PathBuf::from("/storage/emulated/0")
 }
 
 pub fn normalize_local_path(path: &Path) -> PathBuf {

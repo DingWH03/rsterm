@@ -40,6 +40,9 @@ pub struct RstermApp {
     sidebar: Sidebar,
     /// Home central panel: settings instead of connection list.
     home_settings: bool,
+    /// Workspace central panel: full-page settings (narrow layout).
+    workspace_settings: bool,
+    /// Workspace right panel: settings (wide layout only).
     settings_open: bool,
     /// Immediate connect failure (serial open, SSH config, etc.) before a session is opened.
     connection_notice: Option<String>,
@@ -64,6 +67,7 @@ impl Default for RstermApp {
             live_font_size,
             sidebar: Sidebar::new(),
             home_settings: false,
+            workspace_settings: false,
             settings_open: false,
             connection_notice: None,
         }
@@ -360,6 +364,7 @@ impl RstermApp {
         if let Some(id) = action.select_session {
             self.active_session_id = Some(id);
             self.page = Page::Workspace;
+            self.workspace_settings = false;
             if in_overlay {
                 self.sidebar.close_overlay();
             }
@@ -406,8 +411,9 @@ impl RstermApp {
 }
 
 impl eframe::App for RstermApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.sidebar.sync_width(ctx.screen_rect().width());
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx();
+        self.sidebar.sync_width(ctx.content_rect().width());
         show_connection_notice(ctx, &mut self.connection_notice);
 
         match self.page {
@@ -550,12 +556,15 @@ impl eframe::App for RstermApp {
             Page::Workspace => {
                 self.drain_inactive_sessions();
 
+                let on_workspace_settings = self.workspace_settings
+                    || (self.sidebar.wide && self.settings_open);
+
                 let mut sidebar_action = TerminalSidebarAction {
                     select_session: None,
                     close_session: None,
                     new_window_session: None,
                     go_home: false,
-                    settings_open: self.settings_open,
+                    settings_toggled: false,
                 };
 
                 if self.sidebar.docked_visible(SidebarPage::Workspace) {
@@ -567,7 +576,7 @@ impl eframe::App for RstermApp {
                             sidebar_action = terminal_sidebar(
                                 ui,
                                 &mut self.sidebar,
-                                &mut self.settings_open,
+                                on_workspace_settings,
                                 &self.sessions,
                                 self.active_session_id.as_deref(),
                             );
@@ -583,14 +592,25 @@ impl eframe::App for RstermApp {
                         sidebar_action = terminal_sidebar(
                             ui,
                             &mut self.sidebar,
-                            &mut self.settings_open,
+                            on_workspace_settings,
                             &self.sessions,
                             self.active_session_id.as_deref(),
                         );
                     });
                 }
 
-                if self.settings_open {
+                if sidebar_action.settings_toggled {
+                    if self.sidebar.wide {
+                        self.settings_open = !self.settings_open;
+                        self.workspace_settings = false;
+                    } else {
+                        self.workspace_settings = true;
+                        self.settings_open = false;
+                        self.sidebar.close_overlay();
+                    }
+                }
+
+                if self.sidebar.wide && self.settings_open && !self.workspace_settings {
                     let mut close_settings = false;
                     egui::SidePanel::right("workspace_settings_panel")
                         .min_width(300.0)
@@ -613,7 +633,13 @@ impl eframe::App for RstermApp {
                 }
 
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    if let Some(idx) = self.active_session_index() {
+                    if self.workspace_settings {
+                        if settings_page(ui, &mut self.settings) {
+                            self.workspace_settings = false;
+                            save_settings(&self.settings);
+                            self.live_font_size = self.settings.font_size();
+                        }
+                    } else if let Some(idx) = self.active_session_index() {
                         match &mut self.sessions[idx] {
                             WorkspaceSession::Terminal(term) => {
                                 let theme = self.settings.theme();
@@ -625,7 +651,6 @@ impl eframe::App for RstermApp {
                                     theme,
                                     &mut self.live_font_size,
                                     &mut self.sidebar,
-                                    &mut self.settings_open,
                                 );
                             }
                             WorkspaceSession::FileManager(fm) => {
@@ -648,9 +673,14 @@ impl eframe::App for RstermApp {
                 if sidebar_action.go_home {
                     self.save_profile_tweaks();
                     self.page = Page::Home;
+                    self.workspace_settings = false;
+                    self.settings_open = false;
                     self.sidebar.close_overlay();
                 }
-                if sidebar_action.settings_open || self.settings_open {
+                if self.workspace_settings
+                    || self.settings_open
+                    || sidebar_action.settings_toggled
+                {
                     save_settings(&self.settings);
                     self.live_font_size = self.settings.font_size();
                 }

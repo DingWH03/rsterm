@@ -123,7 +123,7 @@ pub fn paint_row(
 
         let mut utf8 = [0u8; 4];
         let ch_str = cell.ch.encode_utf8(&mut utf8);
-        let galley = ui.fonts(|f| {
+        let galley = ui.fonts_mut(|f| {
             f.layout(
                 ch_str.to_string(),
                 font_id.clone(),

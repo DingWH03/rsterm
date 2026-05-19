@@ -79,8 +79,8 @@ pub fn tune_android_display(ctx: &egui::Context) {
     let ppp = (ppp * 4.0).round() / 4.0;
     ctx.set_pixels_per_point(ppp);
     ctx.options_mut(|o| {
-        o.tessellation_options.feathering = true;
-        o.tessellation_options.feathering_size_in_pixels = 0.5;
+        // Heavy feathering + per-cell clips on GLES can look like torn horizontal bands.
+        o.tessellation_options.feathering = false;
     });
 }
 

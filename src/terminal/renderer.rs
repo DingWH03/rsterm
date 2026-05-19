@@ -39,7 +39,7 @@ impl TerminalRenderer {
     /// One terminal column width/height in points (must fit wide/CJK glyphs in 2 columns).
     pub fn measure_cell(ui: &egui::Ui, font_size: f32) -> (f32, f32) {
         let font_id = egui::FontId::monospace(font_size);
-        ui.fonts(|f| {
+        ui.fonts_mut(|f| {
             let latin_w = f
                 .layout(
                     "M".to_string(),
@@ -74,19 +74,28 @@ impl TerminalRenderer {
             let h_cjk = f
                 .layout(
                     "汉".to_string(),
+                    font_id.clone(),
+                    egui::Color32::WHITE,
+                    f32::INFINITY,
+                )
+                .rect
+                .height();
+            let row_h = f
+                .layout(
+                    "Mg汉_".to_string(),
                     font_id,
                     egui::Color32::WHITE,
                     f32::INFINITY,
                 )
                 .rect
                 .height();
-            let mut cell_h = h_latin.max(h_cjk).max(font_size * 1.2);
+            let mut cell_h = h_latin.max(h_cjk).max(row_h).max(font_size * 1.25);
 
-            // Android system fonts are often not fixed-pitch; round up to reduce clipping.
             #[cfg(target_os = "android")]
             {
                 cell_w = cell_w.ceil();
-                cell_h = cell_h.ceil();
+                // Proportional CJK fonts need extra line spacing to avoid row overlap (scanlines).
+                cell_h = (cell_h * 1.2).ceil();
             }
 
             (cell_w, cell_h)
@@ -234,7 +243,7 @@ impl TerminalRenderer {
             .font(font_id.clone())
             .color(fg);
 
-        let galley = ui.fonts(|f| {
+        let galley = ui.fonts_mut(|f| {
             f.layout(
                 text,
                 font_id.clone(),
