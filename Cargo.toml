@@ -2,6 +2,25 @@
 name = "rsterm"
 version = "0.1.0"
 edition = "2024"
+description = "Multi terminal emulator with SSH, serial, BLE, and dual-pane file manager"
+license = "MIT"
+readme = "README.md"
+
+[package.metadata.deb]
+maintainer = "rsTerm DingVero <dingvero@outlook.com>"
+copyright = "2026, rsTerm DingVero"
+license-file = ["LICENSE", "4"]
+extended-description = """\
+rsTerm is a desktop terminal emulator with SSH, local PTY, serial, BLE,\
+and an integrated dual-pane file manager.\
+"""
+section = "utils"
+priority = "optional"
+depends = "libc6 (>= 2.31), libgcc-s1, libssl3 | libssl1.1, libxcb1, libxkbcommon0, libegl1, libgles2, libwayland-client0, libasound2, libfontconfig1, libfreetype6, libdbus-1-3, libx11-6, libxi6, libxrandr2, libudev1 | libudev0"
+assets = [
+    ["target/release/rsterm", "usr/bin/rsterm", "755"],
+    ["packaging/rsterm.desktop", "usr/share/applications/rsterm.desktop", "644"],
+]
 
 [dependencies]
 eframe = "0.31"

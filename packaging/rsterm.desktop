@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=rsTerm
+GenericName=Terminal Emulator
+Comment=Multi terminal emulator with SSH, serial, and file manager
+Exec=rsterm
+Terminal=false
+Type=Application
+Categories=System;TerminalEmulator;
+StartupWMClass=rsterm
