@@ -1,3 +1,9 @@
+//! GUI-only on Windows release builds (no extra console window beside the app).
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 mod app;
 mod config;
 mod connection;
