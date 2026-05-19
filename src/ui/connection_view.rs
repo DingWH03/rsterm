@@ -20,6 +20,8 @@ use crate::ui::terminal_selection::{
 pub struct ActiveSession {
     pub id: String,
     pub conn_type: ConnectionType,
+    /// Set when the link fails or drops; shown in the terminal panel until the user closes the tab.
+    pub disconnect_message: Option<String>,
     /// Source saved connection (for SSH「新窗口」); local may be absent.
     pub saved_conn_id: Option<String>,
     /// Saved connection display name (serial/BLE tab title).
@@ -208,6 +210,49 @@ pub fn connection_view(
             drain_after_resize(session, &mut action, true);
         }
         while drain_connection(session, &mut action) {}
+    }
+
+    // 3b. Connection status / error (blocks interaction with the terminal grid)
+    if let Some(session) = session.as_mut() {
+        if let Some(msg) = session.disconnect_message.clone() {
+            let mut close = false;
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgba_unmultiplied(20, 20, 20, 240))
+                .show(ui, |ui| {
+                    ui.set_min_size(egui::vec2(term_w, term_h));
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(term_h * 0.25);
+                        ui.label(
+                            egui::RichText::new("Connection failed")
+                                .size(18.0)
+                                .strong()
+                                .color(egui::Color32::from_rgb(255, 120, 120)),
+                        );
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new(msg).size(14.0));
+                        ui.add_space(16.0);
+                        if ui.button("Close").clicked() {
+                            close = true;
+                        }
+                    });
+                });
+            if close {
+                action = ConnectionViewAction::CloseSession;
+            }
+            return action;
+        }
+        if matches!(session.handle.state, ConnectionState::Connecting) {
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgba_unmultiplied(20, 20, 20, 200))
+                .show(ui, |ui| {
+                    ui.set_min_size(egui::vec2(term_w, term_h));
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(term_h * 0.35);
+                        ui.label(egui::RichText::new("Connecting…").size(16.0).weak());
+                    });
+                });
+            return action;
+        }
     }
 
     // 4. Terminal surface (keyboard focus target; stable id for focus-lock filter)
@@ -660,8 +705,20 @@ pub(crate) fn drain_connection(session: &mut ActiveSession, action: &mut Connect
         match ev {
             ConnIn::Data(data) => pty_data.extend(data),
             ConnIn::StateChanged(s) => {
-                if matches!(s, ConnectionState::Disconnected | ConnectionState::Error(_)) {
-                    *action = ConnectionViewAction::CloseSession;
+                match s {
+                    ConnectionState::Error(e) => {
+                        session.disconnect_message = Some(e);
+                    }
+                    ConnectionState::Disconnected => {
+                        if session.disconnect_message.is_none() {
+                            session.disconnect_message =
+                                Some("Connection closed.".to_string());
+                        }
+                    }
+                    ConnectionState::Connected => {
+                        session.disconnect_message = None;
+                    }
+                    ConnectionState::Connecting => {}
                 }
             }
         }

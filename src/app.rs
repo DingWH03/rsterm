@@ -39,6 +39,8 @@ pub struct RstermApp {
     /// Home central panel: settings instead of connection list.
     home_settings: bool,
     settings_open: bool,
+    /// Immediate connect failure (serial open, SSH config, etc.) before a session is opened.
+    connection_notice: Option<String>,
 }
 
 impl Default for RstermApp {
@@ -61,7 +63,30 @@ impl Default for RstermApp {
             sidebar: Sidebar::new(),
             home_settings: false,
             settings_open: false,
+            connection_notice: None,
         }
+    }
+}
+
+fn show_connection_notice(ctx: &egui::Context, notice: &mut Option<String>) {
+    let Some(msg) = notice.clone() else {
+        return;
+    };
+    let mut dismiss = false;
+    egui::Window::new("Connection failed")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .show(ctx, |ui| {
+            ui.set_max_width(420.0);
+            ui.label(egui::RichText::new(&msg).size(14.0));
+            ui.add_space(12.0);
+            if ui.button("OK").clicked() {
+                dismiss = true;
+            }
+        });
+    if dismiss {
+        *notice = None;
     }
 }
 
@@ -110,7 +135,7 @@ impl RstermApp {
         let config = self.effective_local_config();
         match local::connect_local(&config, &profile, 24, 80) {
             Ok(handle) => self.open_session(handle, &config, profile.scrollback_lines),
-            Err(e) => info!("Local connection failed: {e}"),
+            Err(e) => self.connection_notice = Some(e),
         }
     }
 
@@ -138,7 +163,7 @@ impl RstermApp {
                 term.selection = None;
                 term.selection_pointer = None;
             }
-            Err(e) => info!("Local reconnect failed: {e}"),
+            Err(e) => term.disconnect_message = Some(e),
         }
     }
 
@@ -181,7 +206,7 @@ impl RstermApp {
         };
         match result {
             Ok(handle) => self.open_session(handle, &config, profile.scrollback_lines),
-            Err(e) => info!("Connection failed: {e}"),
+            Err(e) => self.connection_notice = Some(e),
         }
     }
 
@@ -232,6 +257,7 @@ impl RstermApp {
             size_label_active: false,
             alt_resize_drain_frames: 0,
             mouse_motion_last: None,
+            disconnect_message: None,
         }));
     }
 
@@ -369,6 +395,7 @@ impl RstermApp {
 impl eframe::App for RstermApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.sidebar.sync_width(ctx.screen_rect().width());
+        show_connection_notice(ctx, &mut self.connection_notice);
 
         match self.page {
             Page::Home => {
