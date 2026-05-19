@@ -1,9 +1,8 @@
-# CI: Linux + Windows binaries on every push/PR; .deb matrix + unified Release on version tags.
+# CI: Linux + Windows binaries .deb matrix + unified Release on version tags.
 name: CI
 
 on:
   push:
-    branches: [main, master]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
