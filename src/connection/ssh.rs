@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::future::Future;
-use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
 
 use russh::client::{self, Handle, KeyboardInteractiveAuthResponse};
@@ -9,7 +8,7 @@ use russh::{ChannelMsg, Disconnect};
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::connection::{
-    emit_conn_data, ConnIn, ConnOut, ConnectionHandle, ConnectionState, RepaintNotifier,
+    emit_conn_data, ssh_keys, ConnIn, ConnOut, ConnectionHandle, ConnectionState, RepaintNotifier,
 };
 use crate::storage::types::SavedConnection;
 
@@ -187,7 +186,7 @@ async fn authenticate(
     user: &str,
     password: Option<&str>,
 ) -> Result<(), String> {
-    for path in default_key_paths() {
+    for path in ssh_keys::default_key_paths() {
         if !path.is_file() {
             continue;
         }
@@ -268,14 +267,4 @@ async fn try_keyboard_interactive(
             }
         }
     }
-}
-
-fn default_key_paths() -> Vec<PathBuf> {
-    let Some(home) = directories::UserDirs::new().map(|u| u.home_dir().to_path_buf()) else {
-        return Vec::new();
-    };
-    ["id_ed25519", "id_rsa", "id_ecdsa"]
-        .into_iter()
-        .map(|name| home.join(".ssh").join(name))
-        .collect()
 }

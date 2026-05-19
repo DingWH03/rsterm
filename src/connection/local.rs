@@ -20,6 +20,14 @@ fn pty_size(rows: u16, cols: u16) -> PtySize {
     }
 }
 
+/// Unix: SIGWINCH to the foreground process group. Windows ConPTY: resize on the handle is enough.
+fn signal_winch_if_needed(master: &dyn MasterPty, shell_pid: Option<u32>) {
+    #[cfg(unix)]
+    if let Some(fd) = master.as_raw_fd() {
+        winchg::signal_winch(fd, shell_pid);
+    }
+}
+
 fn apply_pty_resize(
     master: &dyn MasterPty,
     rows: u16,
@@ -27,9 +35,7 @@ fn apply_pty_resize(
     shell_pid: Option<u32>,
 ) {
     if master.resize(pty_size(rows, cols)).is_ok() {
-        if let Some(fd) = master.as_raw_fd() {
-            winchg::signal_winch(fd, shell_pid);
-        }
+        signal_winch_if_needed(master, shell_pid);
     }
 }
 
@@ -54,7 +60,8 @@ pub fn connect_local(
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
     let mut cmd = CommandBuilder::new(&shell);
-    // Login/interactive shell so zsh/bash emit prompts and echo input correctly.
+    // Login/interactive shell (Unix). Windows uses ConPTY + cmd/powershell without -l.
+    #[cfg(unix)]
     cmd.arg("-l");
     cmd.env("COLUMNS", cols.to_string());
     cmd.env("LINES", rows.to_string());
@@ -85,6 +92,7 @@ pub fn connect_local(
     drop(pair.slave);
 
     let master = pair.master;
+    #[cfg(unix)]
     let poll_fd = master.as_raw_fd();
     let mut reader = master.try_clone_reader().map_err(|e| e.to_string())?;
     let mut writer = master.take_writer().map_err(|e| e.to_string())?;
@@ -104,6 +112,7 @@ pub fn connect_local(
                 }
                 Ok(n) => {
                     let mut chunk = buf[..n].to_vec();
+                    #[cfg(unix)]
                     if let Some(fd) = poll_fd {
                         let _ = pty_burst::append_until_idle(fd, &mut *reader, &mut buf, &mut chunk);
                     }
@@ -140,9 +149,7 @@ pub fn connect_local(
                     apply_pty_resize(&*master, rows, cols, shell_pid);
                 }
                 Ok(ConnOut::Winch) => {
-                    if let Some(fd) = master.as_raw_fd() {
-                        winchg::signal_winch(fd, shell_pid);
-                    }
+                    signal_winch_if_needed(&*master, shell_pid);
                 }
                 Ok(ConnOut::Close) => {
                     let _ = writer_from_tx.send(ConnIn::StateChanged(ConnectionState::Disconnected));

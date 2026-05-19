@@ -1,10 +1,11 @@
-# Build .deb packages for amd64, arm64, i386, and armhf (arm32).
-name: Debian packages
+# CI: Linux + Windows binaries on every push/PR; .deb matrix + unified Release on version tags.
+name: CI
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
   workflow_dispatch:
 
 env:
@@ -12,8 +13,70 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  linux:
+    name: Linux x64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install GUI build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev \
+            libasound2-dev \
+            libudev-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libegl1-mesa-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libdbus-1-dev
+
+      - name: cargo build --release
+        run: cargo build --release
+
+      - name: cargo test
+        run: cargo test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rsterm-linux-x64
+          path: target/release/rsterm
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: cargo build --release
+        run: cargo build --release
+
+      - name: cargo test
+        run: cargo test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rsterm-windows-x64
+          path: target/release/rsterm.exe
+          if-no-files-found: error
+
   deb:
     name: deb ${{ matrix.deb_arch }}
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -37,11 +100,9 @@ jobs:
             use_cross: "1"
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust_target }}
 
@@ -85,30 +146,27 @@ jobs:
             ./packaging/build-deb.sh "${{ matrix.rust_target }}" "${{ matrix.deb_arch }}"
           fi
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: rsterm-deb-${{ matrix.deb_arch }}
           path: dist/*.deb
           if-no-files-found: error
 
-  release-assets:
-    name: Attach to GitHub Release
-    needs: deb
+  release:
+    name: GitHub Release assets
     if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows, deb]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download all debs
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: dist
-          pattern: rsterm-deb-*
+          pattern: rsterm-*
           merge-multiple: true
 
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.deb
+          files: dist/**
           generate_release_notes: true

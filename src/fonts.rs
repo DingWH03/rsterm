@@ -2,6 +2,14 @@ use std::sync::Arc;
 
 use egui::FontData;
 
+#[cfg(windows)]
+const MONO_FONT_PATHS: &[&str] = &[
+    r"C:\Windows\Fonts\consola.ttf",
+    r"C:\Windows\Fonts\cour.ttf",
+    r"C:\Windows\Fonts\lucon.ttf",
+];
+
+#[cfg(not(windows))]
 const MONO_FONT_PATHS: &[&str] = &[
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
@@ -11,7 +19,16 @@ const MONO_FONT_PATHS: &[&str] = &[
     "/usr/share/fonts/opentype/noto/NotoSansMono-Regular.ttf",
 ];
 
-/// CJK fallback (Noto CJK / WenQuanYi). Latin mono fonts above do not cover Chinese.
+#[cfg(windows)]
+const CJK_FONT_PATHS: &[&str] = &[
+    r"C:\Windows\Fonts\msyh.ttc",
+    r"C:\Windows\Fonts\msyhbd.ttc",
+    r"C:\Windows\Fonts\simhei.ttf",
+    r"C:\Windows\Fonts\simsun.ttc",
+    r"C:\Windows\Fonts\mingliu.ttc",
+];
+
+#[cfg(not(windows))]
 const CJK_FONT_PATHS: &[&str] = &[
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
@@ -19,6 +36,7 @@ const CJK_FONT_PATHS: &[&str] = &[
     "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
 ];
 
+/// CJK fallback (Noto CJK / WenQuanYi on Linux, Microsoft YaHei etc. on Windows).
 pub fn setup_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
 

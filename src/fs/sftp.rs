@@ -10,6 +10,7 @@ use russh_sftp::client::SftpSession;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+use crate::connection::ssh_keys;
 use crate::fs::entry_info::{self, EntryInfo};
 use crate::fs::transfer_progress::ByteProgress;
 use crate::fs::FileEntry;
@@ -343,7 +344,7 @@ async fn authenticate(
     user: &str,
     password: Option<&str>,
 ) -> Result<(), String> {
-    for path in default_key_paths() {
+    for path in ssh_keys::default_key_paths() {
         if !path.is_file() {
             continue;
         }
@@ -431,16 +432,6 @@ async fn try_keyboard_interactive(
             }
         }
     }
-}
-
-fn default_key_paths() -> Vec<PathBuf> {
-    let Some(home) = directories::UserDirs::new().map(|u| u.home_dir().to_path_buf()) else {
-        return Vec::new();
-    };
-    ["id_ed25519", "id_rsa", "id_ecdsa"]
-        .into_iter()
-        .map(|name| home.join(".ssh").join(name))
-        .collect()
 }
 
 fn metadata_mtime(meta: &russh_sftp::client::fs::Metadata) -> Option<std::time::SystemTime> {

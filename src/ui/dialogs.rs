@@ -209,7 +209,6 @@ impl NewConnectionDialog {
                             }
                         });
                         if self.serial_devices.is_empty() {
-                            ui.label(egui::RichText::new(platform::serial_empty_hint()).weak());
                             ui.horizontal(|ui| {
                                 ui.label("Device:");
                                 ui.text_edit_singleline(&mut self.serial_port);
@@ -236,13 +235,6 @@ impl NewConnectionDialog {
                         ui.horizontal(|ui| {
                             ui.label("Baud rate:");
                             ui.text_edit_singleline(&mut self.serial_baud);
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("或手动路径:");
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.serial_port)
-                                    .hint_text(platform::serial_manual_placeholder()),
-                            );
                         });
                     }
                     ConnectionType::Ble => {

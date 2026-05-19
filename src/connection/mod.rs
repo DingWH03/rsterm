@@ -1,6 +1,7 @@
 pub mod ble;
 pub mod local;
 pub mod pty_burst;
+pub mod ssh_keys;
 pub mod winchg;
 pub mod serial;
 pub mod ssh;

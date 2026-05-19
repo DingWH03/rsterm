@@ -4,10 +4,22 @@ use std::fs;
 
 /// `user@hostname` for the local machine.
 pub fn local_user_at_host() -> String {
-    let user = std::env::var("USER")
-        .or_else(|_| std::env::var("LOGNAME"))
-        .unwrap_or_else(|_| "user".into());
-    format!("{user}@{}", local_hostname())
+    format!("{}@{}", local_username(), local_hostname())
+}
+
+fn local_username() -> String {
+    #[cfg(windows)]
+    {
+        return std::env::var("USERNAME")
+            .or_else(|_| std::env::var("USER"))
+            .unwrap_or_else(|_| "user".into());
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("USER")
+            .or_else(|_| std::env::var("LOGNAME"))
+            .unwrap_or_else(|_| "user".into())
+    }
 }
 
 pub fn ssh_user_at_host(user: &str, host: &str) -> String {
@@ -124,7 +136,14 @@ fn local_hostname() -> String {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn local_hostname() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "localhost".into())
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn local_hostname() -> String {
     std::env::var("HOSTNAME").unwrap_or_else(|_| "localhost".into())
 }
