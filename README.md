@@ -15,7 +15,7 @@ CI builds `.deb` packages for **amd64**, **arm64**, **i386**, and **armhf** (see
 Local packaging (example, amd64):
 
 ```bash
-sudo apt-get install build-essential pkg-config libssl-dev \
+sudo apt-get install build-essential pkg-config \
   libxcb-render0-dev libxkbcommon-dev libasound2-dev libudev-dev \
   libwayland-dev libx11-dev libxi-dev libxrandr-dev libegl1-mesa-dev
 cargo install cargo-deb --locked
