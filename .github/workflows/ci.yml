@@ -131,6 +131,14 @@ jobs:
         if: matrix.use_cross == '1'
         run: cargo install cross --locked
 
+      - name: Install cross binutils (for cargo-deb strip)
+        if: matrix.use_cross == '1'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils-arm-linux-gnueabihf \
+            binutils-i686-linux-gnu
+
       - name: Install cargo-deb
         run: cargo install cargo-deb --locked
 

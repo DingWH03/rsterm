@@ -6,6 +6,9 @@ description = "Multi terminal emulator with SSH, serial, BLE, and dual-pane file
 license = "MIT"
 readme = "README.md"
 
+[profile.release]
+strip = "symbols"
+
 [package.metadata.deb]
 maintainer = "rsTerm DingVero <dingvero@outlook.com>"
 copyright = "2026, rsTerm DingVero"

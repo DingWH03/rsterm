@@ -1,0 +1,8 @@
+# cargo-deb uses per-target strip when packaging. Cross-built binaries need the
+# matching binutils strip on the host (see CI / binutils-*-linux-gnu packages).
+
+[target.armv7-unknown-linux-gnueabihf]
+strip = { path = "arm-linux-gnueabihf-strip" }
+
+[target.i686-unknown-linux-gnu]
+strip = { path = "i686-linux-gnu-strip" }

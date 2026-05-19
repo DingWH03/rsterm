@@ -37,7 +37,20 @@ if ! command -v cargo-deb >/dev/null 2>&1; then
   cargo install cargo-deb --locked
 fi
 
-cargo deb --target "$RUST_TARGET" --no-build
+cross_strip_for_target() {
+    case "$1" in
+        armv7-unknown-linux-gnueabihf) command -v arm-linux-gnueabihf-strip ;;
+        i686-unknown-linux-gnu) command -v i686-linux-gnu-strip ;;
+        *) return 1 ;;
+    esac
+}
+
+deb_args=(--target "$RUST_TARGET" --no-build)
+if [[ "$USE_CROSS" == "1" ]] && ! cross_strip_for_target "$RUST_TARGET" >/dev/null; then
+    echo "warning: cross strip tool not found; .deb will not be stripped (install binutils-*-linux-gnu)" >&2
+    deb_args+=(--no-strip)
+fi
+cargo deb "${deb_args[@]}"
 
 mkdir -p dist
 shopt -s nullglob
