@@ -4,25 +4,15 @@ Multi terminal emulator with SSH, local PTY, serial, BLE, and a dual-pane file m
 
 ## Build from source
 
-### Linux
-
 ```bash
-cargo build --release
-```
-
-On Debian/Ubuntu you may need GUI dev libraries (see [CI workflow](.github/workflows/ci.yml) job `linux` → `Install GUI build dependencies`).
-
-### Windows
-
-On **Windows 10/11** with [Rust](https://rustup.rs/) (MSVC toolchain):
-
-```powershell
 cargo build --release
 ```
 
 ## Debian packages
 
-Tag builds produce `.deb` files via `cargo-deb` (see CI `deb` job). Local packaging (example, amd64):
+CI builds `.deb` packages for **amd64**, **arm64**, **i386**, and **armhf** (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+
+Local packaging (example, amd64):
 
 ```bash
 sudo apt-get install build-essential pkg-config \
