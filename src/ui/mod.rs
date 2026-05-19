@@ -3,6 +3,8 @@ pub mod connection_view;
 pub mod terminal_input;
 pub mod devices;
 pub mod dialogs;
+pub mod file_manager;
+pub mod file_transfer;
 pub mod home;
 pub mod home_sidebar;
 pub mod sidebar_common;

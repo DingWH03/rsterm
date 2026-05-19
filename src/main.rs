@@ -1,6 +1,8 @@
 mod app;
 mod config;
 mod connection;
+mod fs;
+mod session;
 mod fonts;
 mod platform;
 mod settings;

@@ -4,11 +4,13 @@ use crate::storage;
 use crate::storage::types::{ConnectionType, SavedConnection};
 use crate::terminal::renderer::TerminalRenderer;
 use crate::terminal::Terminal;
+use crate::session::{FileManagerMode, FileManagerSession, WorkspaceSession};
 use crate::ui::connection_view::{
     drain_connection, ActiveSession, ConnectionViewAction, connection_view,
 };
-use crate::ui::dialogs::NewConnectionDialog;
-use crate::ui::home::home_screen;
+use crate::ui::file_manager::{file_manager_view, FileManagerAction};
+use crate::ui::dialogs::{LocalTerminalSettingsDialog, NewConnectionDialog};
+use crate::ui::home::{home_screen, HomeCardMenuAction};
 use crate::ui::home_sidebar::{paint_home_sidebar, HomeSidebarAction};
 use crate::ui::keyboard::VirtualKeyboard;
 use crate::ui::settings_page::{settings_page, settings_side_panel};
@@ -25,11 +27,12 @@ enum Page {
 pub struct RstermApp {
     settings: AppSettings,
     saved_connections: Vec<SavedConnection>,
-    sessions: Vec<ActiveSession>,
+    sessions: Vec<WorkspaceSession>,
     active_session_id: Option<String>,
     terminal_renderer: TerminalRenderer,
     virtual_keyboard: VirtualKeyboard,
     new_conn_dialog: NewConnectionDialog,
+    local_term_dialog: LocalTerminalSettingsDialog,
     page: Page,
     live_font_size: f32,
     sidebar: Sidebar,
@@ -52,6 +55,7 @@ impl Default for RstermApp {
             terminal_renderer: TerminalRenderer::new(24, 80),
             virtual_keyboard: VirtualKeyboard::new(kbd_mode),
             new_conn_dialog: NewConnectionDialog::default(),
+            local_term_dialog: LocalTerminalSettingsDialog::default(),
             page: Page::Home,
             live_font_size,
             sidebar: Sidebar::new(),
@@ -62,19 +66,104 @@ impl Default for RstermApp {
 }
 
 impl RstermApp {
-    fn push_session(&mut self, session: ActiveSession) {
-        let id = session.id.clone();
+    fn push_session(&mut self, session: WorkspaceSession) {
+        let id = session.id().to_string();
         self.active_session_id = Some(id);
         self.sessions.push(session);
         self.page = Page::Workspace;
     }
 
+    fn open_file_manager_ssh(&mut self, conn_id: &str) {
+        let config = match self.saved_connections.iter().find(|c| c.id == conn_id) {
+            Some(c) => c.clone(),
+            None => return,
+        };
+        match FileManagerSession::open_ssh(&config) {
+            Ok(fm) => self.push_session(WorkspaceSession::FileManager(fm)),
+            Err(e) => info!("SFTP failed: {e}"),
+        }
+    }
+
+    fn open_file_manager_local(&mut self) {
+        self.push_session(WorkspaceSession::FileManager(FileManagerSession::open_local()));
+    }
+
+    fn effective_local_config(&self) -> SavedConnection {
+        if let Some(id) = &self.settings.default_local_connection_id {
+            if let Some(c) = self
+                .saved_connections
+                .iter()
+                .find(|c| c.id == *id && c.conn_type == ConnectionType::Local)
+            {
+                return c.clone();
+            }
+        }
+        self.saved_connections
+            .iter()
+            .find(|c| c.conn_type == ConnectionType::Local)
+            .cloned()
+            .unwrap_or_else(|| SavedConnection::new_local("Local Terminal", None))
+    }
+
     fn connect_local(&mut self) {
         let profile = self.settings.default_profile().clone();
-        let config = SavedConnection::new_local("Local Terminal", None);
+        let config = self.effective_local_config();
         match local::connect_local(&config, &profile, 24, 80) {
             Ok(handle) => self.open_session(handle, &config, profile.scrollback_lines),
             Err(e) => info!("Local connection failed: {e}"),
+        }
+    }
+
+    fn reconnect_local_session(&mut self, session_id: &str, config: &SavedConnection) {
+        let Some(idx) = self.sessions.iter().position(|s| s.id() == session_id) else {
+            return;
+        };
+        let WorkspaceSession::Terminal(term) = &mut self.sessions[idx] else {
+            return;
+        };
+        if term.conn_type != ConnectionType::Local {
+            return;
+        }
+        term.handle.close();
+        let profile = self.settings.default_profile().clone();
+        let rows = term.last_pty_rows.max(1);
+        let cols = term.last_pty_cols.max(1);
+        match local::connect_local(config, &profile, rows, cols) {
+            Ok(handle) => {
+                term.handle = handle;
+                term.saved_conn_id = Some(config.id.clone());
+                term.name = config.name.clone();
+                term.user_at_host = crate::platform::local_user_at_host();
+                term.want_terminal_focus = true;
+                term.selection = None;
+                term.selection_pointer = None;
+            }
+            Err(e) => info!("Local reconnect failed: {e}"),
+        }
+    }
+
+    fn apply_local_terminal_settings(
+        &mut self,
+        apply: crate::ui::dialogs::LocalTerminalSettingsApply,
+    ) {
+        if self
+            .saved_connections
+            .iter()
+            .any(|c| c.id == apply.config.id)
+        {
+            if let Some(pos) = self
+                .saved_connections
+                .iter()
+                .position(|c| c.id == apply.config.id)
+            {
+                self.saved_connections[pos] = apply.config.clone();
+            }
+            storage::save_connections(&self.saved_connections);
+            self.settings.default_local_connection_id = Some(apply.config.id.clone());
+            save_settings(&self.settings);
+        }
+        if let Some(session_id) = &apply.session_id {
+            self.reconnect_local_session(session_id, &apply.config);
         }
     }
 
@@ -118,7 +207,7 @@ impl RstermApp {
             _ => String::new(),
         };
 
-        self.push_session(ActiveSession {
+        self.push_session(WorkspaceSession::Terminal(ActiveSession {
             id: uuid::Uuid::new_v4().to_string(),
             conn_type: config.conn_type.clone(),
             saved_conn_id: Some(config.id.clone()),
@@ -143,16 +232,18 @@ impl RstermApp {
             size_label_active: false,
             alt_resize_drain_frames: 0,
             mouse_motion_last: None,
-        });
+        }));
     }
 
     fn close_session(&mut self, id: &str) {
-        if let Some(pos) = self.sessions.iter().position(|s| s.id == id) {
-            self.sessions[pos].handle.close();
+        if let Some(pos) = self.sessions.iter().position(|s| s.id() == id) {
+            if let WorkspaceSession::Terminal(s) = &mut self.sessions[pos] {
+                s.handle.close();
+            }
             self.sessions.remove(pos);
         }
         if self.active_session_id.as_deref() == Some(id) {
-            self.active_session_id = self.sessions.last().map(|s| s.id.clone());
+            self.active_session_id = self.sessions.last().map(|s| s.id().to_string());
         }
         if self.sessions.is_empty() {
             self.active_session_id = None;
@@ -177,32 +268,48 @@ impl RstermApp {
     fn drain_inactive_sessions(&mut self) {
         let active = self.active_session_id.as_deref();
         for session in &mut self.sessions {
-            if active == Some(session.id.as_str()) {
+            if active == Some(session.id()) {
                 continue;
             }
-            let mut noop = ConnectionViewAction::None;
-            drain_connection(session, &mut noop);
+            if let Some(term) = session.terminal_mut() {
+                let mut noop = ConnectionViewAction::None;
+                drain_connection(term, &mut noop);
+            }
         }
     }
 
     fn open_new_window_for_session(&mut self, session_id: &str) {
-        let plan = self.sessions.iter().find(|s| s.id == session_id).map(|s| {
-            (
-                s.conn_type.clone(),
-                s.saved_conn_id.clone(),
-            )
-        });
-        let Some((conn_type, saved_conn_id)) = plan else {
-            return;
-        };
-        match conn_type {
-            ConnectionType::Local => self.connect_local(),
-            ConnectionType::Ssh => {
-                if let Some(ref id) = saved_conn_id {
-                    self.connect_to(id);
-                }
+        enum DupPlan {
+            TerminalLocal,
+            TerminalSsh(String),
+            FileSsh(String),
+            FileLocal,
+        }
+        let plan = self.sessions.iter().find(|s| s.id() == session_id).and_then(|s| {
+            match s {
+                WorkspaceSession::Terminal(term) => match term.conn_type {
+                    ConnectionType::Local => Some(DupPlan::TerminalLocal),
+                    ConnectionType::Ssh => term
+                        .saved_conn_id
+                        .clone()
+                        .map(DupPlan::TerminalSsh),
+                    ConnectionType::Serial | ConnectionType::Ble => None,
+                },
+                WorkspaceSession::FileManager(fm) => match fm.mode {
+                    FileManagerMode::SshSftp => fm
+                        .saved_conn_id
+                        .clone()
+                        .map(DupPlan::FileSsh),
+                    FileManagerMode::LocalDual => Some(DupPlan::FileLocal),
+                },
             }
-            ConnectionType::Serial | ConnectionType::Ble => {}
+        });
+        match plan {
+            Some(DupPlan::TerminalLocal) => self.connect_local(),
+            Some(DupPlan::TerminalSsh(id)) => self.connect_to(&id),
+            Some(DupPlan::FileSsh(id)) => self.open_file_manager_ssh(&id),
+            Some(DupPlan::FileLocal) => self.open_file_manager_local(),
+            None => {}
         }
     }
 
@@ -251,6 +358,12 @@ impl RstermApp {
         }
         self.apply_session_panel_action(result.sessions, in_overlay);
     }
+
+    fn active_session_index(&self) -> Option<usize> {
+        self.active_session_id
+            .as_ref()
+            .and_then(|id| self.sessions.iter().position(|s| s.id() == id))
+    }
 }
 
 impl eframe::App for RstermApp {
@@ -260,10 +373,15 @@ impl eframe::App for RstermApp {
         match self.page {
             Page::Home => {
                 let mut local_clicked = false;
+                let mut local_fm_clicked = false;
                 let mut fab_clicked = false;
                 let mut connect_clicked = None;
+                let mut edit_clicked = None;
+                let mut sftp_clicked = None;
                 let mut delete_clicked = None;
                 let mut _settings_clicked = false;
+                let mut selected_conn_id: Option<String> = None;
+                let mut card_menu = HomeCardMenuAction::default();
 
                 if self.sidebar.docked_visible(SidebarPage::Home) {
                     egui::SidePanel::left("home_sidebar")
@@ -323,30 +441,66 @@ impl eframe::App for RstermApp {
                         home_screen(
                             ui,
                             &self.saved_connections,
+                            &mut selected_conn_id,
+                            &mut card_menu,
                             &mut local_clicked,
+                            &mut local_fm_clicked,
                             &mut fab_clicked,
                             &mut connect_clicked,
+                            &mut edit_clicked,
+                            &mut sftp_clicked,
                             &mut delete_clicked,
                             &mut _settings_clicked,
                         );
                     }
                 });
 
+                if card_menu.local_fm {
+                    local_fm_clicked = true;
+                }
+                if let Some(id) = card_menu.sftp_id.clone() {
+                    sftp_clicked = Some(id);
+                }
+                if let Some(apply) =
+                    self.local_term_dialog.show(ctx, &self.saved_connections)
+                {
+                    self.apply_local_terminal_settings(apply);
+                }
+
                 if local_clicked {
                     self.connect_local();
                 }
+                if local_fm_clicked {
+                    self.open_file_manager_local();
+                }
                 if fab_clicked {
-                    self.new_conn_dialog.open = true;
+                    self.new_conn_dialog.open_new();
                 }
                 if let Some(ref id) = connect_clicked {
                     self.connect_to(id);
+                }
+                if let Some(ref id) = edit_clicked {
+                    if let Some(conn) = self.saved_connections.iter().find(|c| &c.id == id) {
+                        self.new_conn_dialog.open_edit(conn);
+                    }
+                }
+                if let Some(ref id) = sftp_clicked {
+                    self.open_file_manager_ssh(id);
                 }
                 if let Some(ref id) = delete_clicked {
                     self.saved_connections.retain(|c| c.id != *id);
                     storage::save_connections(&self.saved_connections);
                 }
                 if let Some(new_conn) = self.new_conn_dialog.show(ctx) {
-                    self.saved_connections.push(new_conn);
+                    if let Some(pos) = self
+                        .saved_connections
+                        .iter()
+                        .position(|c| c.id == new_conn.id)
+                    {
+                        self.saved_connections[pos] = new_conn;
+                    } else {
+                        self.saved_connections.push(new_conn);
+                    }
                     storage::save_connections(&self.saved_connections);
                 }
                 ctx.request_repaint_after(std::time::Duration::from_secs(1));
@@ -410,31 +564,33 @@ impl eframe::App for RstermApp {
                 }
 
                 let mut view_action = ConnectionViewAction::None;
-                if let Some(idx) = self
-                    .active_session_id
-                    .as_ref()
-                    .and_then(|id| self.sessions.iter().position(|s| &s.id == id))
-                {
-                    self.sessions[idx].handle.repaint.set_context(ctx.clone());
+                let mut fm_action = FileManagerAction::default();
+                if let Some(idx) = self.active_session_index() {
+                    if let WorkspaceSession::Terminal(term) = &mut self.sessions[idx] {
+                        term.handle.repaint.set_context(ctx.clone());
+                    }
                 }
 
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    let active_idx = self
-                        .active_session_id
-                        .as_ref()
-                        .and_then(|id| self.sessions.iter().position(|s| &s.id == id));
-                    if let Some(idx) = active_idx {
-                        let theme = self.settings.theme();
-                        view_action = connection_view(
-                            ui,
-                            Some(&mut self.sessions[idx]),
-                            &mut self.terminal_renderer,
-                            &mut self.virtual_keyboard,
-                            theme,
-                            &mut self.live_font_size,
-                            &mut self.sidebar,
-                            &mut self.settings_open,
-                        );
+                    if let Some(idx) = self.active_session_index() {
+                        match &mut self.sessions[idx] {
+                            WorkspaceSession::Terminal(term) => {
+                                let theme = self.settings.theme();
+                                view_action = connection_view(
+                                    ui,
+                                    Some(term),
+                                    &mut self.terminal_renderer,
+                                    &mut self.virtual_keyboard,
+                                    theme,
+                                    &mut self.live_font_size,
+                                    &mut self.sidebar,
+                                    &mut self.settings_open,
+                                );
+                            }
+                            WorkspaceSession::FileManager(fm) => {
+                                fm_action = file_manager_view(ui, fm, &mut self.sidebar);
+                            }
+                        }
                     } else {
                         ui.vertical_centered(|ui| {
                             ui.add_space(40.0);
@@ -465,12 +621,13 @@ impl eframe::App for RstermApp {
                     },
                     self.sidebar.overlay_visible(),
                 );
-                if matches!(view_action, ConnectionViewAction::CloseSession) {
+                if matches!(view_action, ConnectionViewAction::CloseSession)
+                    || fm_action.close
+                {
                     if let Some(id) = self.active_session_id.clone() {
                         self.close_session(&id);
                     }
                 }
-
                 ctx.request_repaint_after(std::time::Duration::from_millis(400));
             }
         }

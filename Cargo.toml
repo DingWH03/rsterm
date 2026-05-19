@@ -20,3 +20,4 @@ uuid = { version = "1", features = ["v4"] }
 arboard = { version = "3", features = ["wayland-data-control"] }
 unicode-width = "0.2"
 libc = "0.2"
+ssh2 = "0.9"

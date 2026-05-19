@@ -1,4 +1,4 @@
-use crate::ui::connection_view::ActiveSession;
+use crate::session::WorkspaceSession;
 use crate::ui::sidebar::Sidebar;
 use crate::ui::sidebar::SidebarPage;
 
@@ -30,7 +30,7 @@ pub fn sidebar_brand_row(
 
 pub fn sidebar_sessions_panel(
     ui: &mut egui::Ui,
-    sessions: &[ActiveSession],
+    sessions: &[WorkspaceSession],
     active_id: Option<&str>,
 ) -> SidebarSessionAction {
     let mut action = SidebarSessionAction {
@@ -58,6 +58,13 @@ pub fn sidebar_sessions_panel(
             for session in sessions {
                 paint_session_row(ui, session, active_id, &mut action);
             }
+            // Marquee titles need continuous repaints.
+            if sessions.iter().any(|s| {
+                let t = format!("{} {}", s.icon(), s.tab_label());
+                t.chars().count() > 18
+            }) {
+                ui.ctx().request_repaint();
+            }
         });
 
     action
@@ -65,12 +72,12 @@ pub fn sidebar_sessions_panel(
 
 fn paint_session_row(
     ui: &mut egui::Ui,
-    session: &ActiveSession,
+    session: &WorkspaceSession,
     active_id: Option<&str>,
     action: &mut SidebarSessionAction,
 ) {
-    let active = active_id == Some(session.id.as_str());
-    let full_text = format!("{} {}", session.conn_type.icon(), session.tab_label());
+    let active = active_id == Some(session.id());
+    let full_text = format!("{} {}", session.icon(), session.tab_label());
     let show_new = session.sidebar_has_new_window();
     let actions_w = if show_new {
         SESSION_ACTIONS_WIDTH
@@ -85,7 +92,7 @@ fn paint_session_row(
         let label_resp = paint_session_label(ui, &full_text, active, label_w);
 
         if label_resp.clicked() {
-            action.select_session = Some(session.id.clone());
+            action.select_session = Some(session.id().to_string());
         }
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -95,7 +102,7 @@ fn paint_session_row(
                 .on_hover_text("关闭")
                 .clicked()
             {
-                action.close_session = Some(session.id.clone());
+                action.close_session = Some(session.id().to_string());
             }
             if show_new
                 && ui
@@ -108,7 +115,7 @@ fn paint_session_row(
                     .on_hover_text("新窗口")
                     .clicked()
             {
-                action.new_window_session = Some(session.id.clone());
+                action.new_window_session = Some(session.id().to_string());
             }
         });
     });

@@ -38,6 +38,9 @@ pub struct AppSettings {
     pub profiles: Vec<Profile>,
     pub default_profile_name: String,
     pub ssh_env_vars: HashMap<String, String>,
+    /// Saved local connection profile used for quick「Open Local Terminal」.
+    #[serde(default)]
+    pub default_local_connection_id: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -50,6 +53,7 @@ impl Default for AppSettings {
                 ("TERM".to_string(), "xterm-256color".to_string()),
                 ("LANG".to_string(), "en_US.UTF-8".to_string()),
             ]),
+            default_local_connection_id: None,
         }
     }
 }

@@ -36,6 +36,9 @@ pub struct SavedConnection {
     pub last_connected: Option<String>,
     /// Local: shell path
     pub shell: Option<String>,
+    /// Local: initial working directory
+    #[serde(default)]
+    pub working_dir: Option<String>,
     /// SSH
     pub ssh_host: Option<String>,
     pub ssh_port: Option<u16>,
@@ -57,6 +60,7 @@ impl SavedConnection {
             conn_type: ConnectionType::Local,
             last_connected: None,
             shell: shell.map(|s| s.to_string()),
+            working_dir: None,
             ssh_host: None,
             ssh_port: None,
             ssh_user: None,
@@ -74,6 +78,7 @@ impl SavedConnection {
             conn_type: ConnectionType::Ssh,
             last_connected: None,
             shell: None,
+            working_dir: None,
             ssh_host: Some(host.to_string()),
             ssh_port: Some(port),
             ssh_user: Some(user.to_string()),
@@ -91,6 +96,7 @@ impl SavedConnection {
             conn_type: ConnectionType::Serial,
             last_connected: None,
             shell: None,
+            working_dir: None,
             ssh_host: None,
             ssh_port: None,
             ssh_user: None,
@@ -108,6 +114,7 @@ impl SavedConnection {
             conn_type: ConnectionType::Ble,
             last_connected: None,
             shell: None,
+            working_dir: None,
             ssh_host: None,
             ssh_port: None,
             ssh_user: None,

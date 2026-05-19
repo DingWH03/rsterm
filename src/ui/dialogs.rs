@@ -6,10 +6,13 @@ use crate::ui::devices::{enumerate_serial_ports, scan_ble_devices_blocking};
 
 pub struct NewConnectionDialog {
     pub open: bool,
+    /// When set, dialog edits an existing connection (preserves id on save).
+    edit_id: Option<String>,
     pub name: String,
     pub conn_type: ConnectionType,
     // Local
     pub shell: String,
+    pub working_dir: String,
     // SSH
     pub ssh_host: String,
     pub ssh_port: String,
@@ -30,9 +33,11 @@ impl Default for NewConnectionDialog {
     fn default() -> Self {
         Self {
             open: false,
+            edit_id: None,
             name: String::new(),
             conn_type: ConnectionType::Local,
             shell: String::new(),
+            working_dir: String::new(),
             ssh_host: String::new(),
             ssh_port: "22".to_string(),
             ssh_user: String::new(),
@@ -49,6 +54,31 @@ impl Default for NewConnectionDialog {
 }
 
 impl NewConnectionDialog {
+    pub fn open_new(&mut self) {
+        *self = Self::default();
+        self.open = true;
+    }
+
+    pub fn open_edit(&mut self, conn: &SavedConnection) {
+        *self = Self::default();
+        self.open = true;
+        self.edit_id = Some(conn.id.clone());
+        self.name = conn.name.clone();
+        self.conn_type = conn.conn_type.clone();
+        self.shell = conn.shell.clone().unwrap_or_default();
+        self.working_dir = conn.working_dir.clone().unwrap_or_default();
+        self.ssh_host = conn.ssh_host.clone().unwrap_or_default();
+        self.ssh_port = conn.ssh_port.map(|p| p.to_string()).unwrap_or_else(|| "22".into());
+        self.ssh_user = conn.ssh_user.clone().unwrap_or_default();
+        self.ssh_password = conn.ssh_password.clone().unwrap_or_default();
+        self.serial_port = conn.serial_port.clone().unwrap_or_default();
+        self.serial_baud = conn
+            .serial_baud
+            .map(|b| b.to_string())
+            .unwrap_or_else(|| "115200".into());
+        self.ble_device = conn.ble_device.clone().unwrap_or_default();
+    }
+
     fn available_types(caps: &Capabilities) -> Vec<ConnectionType> {
         let mut types = Vec::new();
         if caps.local_terminal {
@@ -91,7 +121,12 @@ impl NewConnectionDialog {
         let mut result = None;
         let mut close = false;
 
-        egui::Window::new("New Connection")
+        let title = if self.edit_id.is_some() {
+            "编辑连接"
+        } else {
+            "新建连接"
+        };
+        egui::Window::new(title)
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
@@ -101,6 +136,7 @@ impl NewConnectionDialog {
                     ui.text_edit_singleline(&mut self.name);
                 });
 
+                let editing = self.edit_id.is_some();
                 ui.horizontal(|ui| {
                     ui.label("Type:");
                     for ct in Self::available_types(&caps) {
@@ -109,7 +145,10 @@ impl NewConnectionDialog {
                         if selected {
                             text = text.strong().color(egui::Color32::from_rgb(33, 150, 243));
                         }
-                        if ui.selectable_label(selected, text).clicked() {
+                        if ui
+                            .add_enabled(!editing, egui::SelectableLabel::new(selected, text))
+                            .clicked()
+                        {
                             if self.conn_type != ct {
                                 self.conn_type = ct.clone();
                                 if ct == ConnectionType::Serial {
@@ -129,6 +168,10 @@ impl NewConnectionDialog {
                         ui.horizontal(|ui| {
                             ui.label("Shell (optional):");
                             ui.text_edit_singleline(&mut self.shell);
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Working directory:");
+                            ui.text_edit_singleline(&mut self.working_dir);
                         });
                     }
                     ConnectionType::Ssh => {
@@ -261,18 +304,27 @@ impl NewConnectionDialog {
                             ConnectionType::Local => true,
                         };
 
+                    let save_label = if self.edit_id.is_some() {
+                        "保存"
+                    } else {
+                        "创建"
+                    };
                     if ui
-                        .add_enabled(can_create, egui::Button::new("Create"))
+                        .add_enabled(can_create, egui::Button::new(save_label))
                         .clicked()
                     {
-                        let conn = match &self.conn_type {
+                        let mut conn = match &self.conn_type {
                             ConnectionType::Local => {
                                 let shell = if self.shell.is_empty() {
                                     None
                                 } else {
                                     Some(self.shell.as_str())
                                 };
-                                SavedConnection::new_local(&self.name, shell)
+                                let mut c = SavedConnection::new_local(&self.name, shell);
+                                if !self.working_dir.trim().is_empty() {
+                                    c.working_dir = Some(self.working_dir.trim().to_string());
+                                }
+                                c
                             }
                             ConnectionType::Ssh => {
                                 let mut c = SavedConnection::new_ssh(
@@ -295,6 +347,9 @@ impl NewConnectionDialog {
                                 SavedConnection::new_ble(&self.name, &self.ble_device)
                             }
                         };
+                        if let Some(id) = self.edit_id.take() {
+                            conn.id = id;
+                        }
                         result = Some(conn);
                         close = true;
                     }
@@ -361,5 +416,217 @@ impl NewConnectionDialog {
                 self.ble_scanning = false;
             }
         }
+    }
+}
+
+/// Runtime settings for an active local terminal (shell, cwd, saved profile).
+pub struct LocalTerminalSettingsDialog {
+    pub open: bool,
+    session_id: Option<String>,
+    profile_id: Option<String>,
+    pub shell: String,
+    pub working_dir: String,
+}
+
+#[derive(Clone)]
+pub struct LocalTerminalSettingsApply {
+    /// When set, reconnect this workspace session after saving.
+    pub session_id: Option<String>,
+    pub config: SavedConnection,
+}
+
+impl Default for LocalTerminalSettingsDialog {
+    fn default() -> Self {
+        Self {
+            open: false,
+            session_id: None,
+            profile_id: None,
+            shell: String::new(),
+            working_dir: String::new(),
+        }
+    }
+}
+
+impl LocalTerminalSettingsDialog {
+    pub fn open_for(
+        &mut self,
+        session_id: &str,
+        saved_conn_id: Option<&str>,
+        shell: Option<&str>,
+        working_dir: Option<&str>,
+        connections: &[SavedConnection],
+    ) {
+        self.open = true;
+        self.session_id = Some(session_id.to_string());
+        self.fill_fields(saved_conn_id, shell, working_dir, connections);
+    }
+
+    /// Home screen: edit default local terminal without an active session.
+    pub fn open_for_home(
+        &mut self,
+        connections: &[SavedConnection],
+        default_local_id: Option<&str>,
+    ) {
+        self.open = true;
+        self.session_id = None;
+        if let Some(id) = default_local_id {
+            self.fill_fields(Some(id), None, None, connections);
+        } else if let Some(c) = connections.iter().find(|c| c.conn_type == ConnectionType::Local) {
+            self.fill_fields(Some(&c.id), None, None, connections);
+        } else {
+            self.profile_id = None;
+            self.shell = crate::platform::default_shell();
+            self.working_dir.clear();
+        }
+    }
+
+    fn fill_fields(
+        &mut self,
+        saved_conn_id: Option<&str>,
+        shell: Option<&str>,
+        working_dir: Option<&str>,
+        connections: &[SavedConnection],
+    ) {
+        self.profile_id = saved_conn_id.map(|s| s.to_string());
+        if let Some(id) = saved_conn_id {
+            if let Some(c) = connections.iter().find(|c| c.id == id) {
+                self.shell = c.shell.clone().unwrap_or_default();
+                self.working_dir = c.working_dir.clone().unwrap_or_default();
+                return;
+            }
+        }
+        self.shell = shell
+            .map(|s| s.to_string())
+            .unwrap_or_else(crate::platform::default_shell);
+        self.working_dir = working_dir.unwrap_or_default().to_string();
+    }
+
+    fn load_profile(&mut self, id: &str, connections: &[SavedConnection]) {
+        let Some(c) = connections
+            .iter()
+            .find(|c| c.id == id && c.conn_type == ConnectionType::Local)
+        else {
+            return;
+        };
+        self.profile_id = Some(id.to_string());
+        self.shell = c.shell.clone().unwrap_or_default();
+        self.working_dir = c.working_dir.clone().unwrap_or_default();
+    }
+
+    pub fn show(
+        &mut self,
+        ctx: &egui::Context,
+        connections: &[SavedConnection],
+    ) -> Option<LocalTerminalSettingsApply> {
+        if !self.open {
+            return None;
+        }
+
+        let mut result = None;
+        let mut close = false;
+
+        egui::Window::new("Local Terminal Settings")
+            .collapsible(false)
+            .resizable(true)
+            .default_width(420.0)
+            .show(ctx, |ui| {
+                let local_profiles: Vec<&SavedConnection> = connections
+                    .iter()
+                    .filter(|c| c.conn_type == ConnectionType::Local)
+                    .collect();
+
+                ui.label("Saved profile (optional):");
+                let selected_label = self
+                    .profile_id
+                    .as_ref()
+                    .and_then(|id| local_profiles.iter().find(|c| c.id == *id))
+                    .map(|c| c.name.as_str())
+                    .unwrap_or("(custom — not linked to a saved profile)");
+                egui::ComboBox::from_id_salt("local_term_profile")
+                    .selected_text(selected_label)
+                    .show_ui(ui, |ui| {
+                        if ui.selectable_label(self.profile_id.is_none(), "(custom)").clicked() {
+                            self.profile_id = None;
+                        }
+                        for c in &local_profiles {
+                            if ui
+                                .selectable_label(
+                                    self.profile_id.as_deref() == Some(c.id.as_str()),
+                                    &c.name,
+                                )
+                                .clicked()
+                            {
+                                self.load_profile(&c.id, connections);
+                            }
+                        }
+                    });
+
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label("Shell:");
+                    ui.text_edit_singleline(&mut self.shell);
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Working directory:");
+                    ui.text_edit_singleline(&mut self.working_dir);
+                });
+                let hint = if self.session_id.is_some() {
+                    "Saved settings apply after reconnecting the active session."
+                } else {
+                    "These settings are used the next time you open a local terminal."
+                };
+                ui.label(egui::RichText::new(hint).small().weak());
+
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        close = true;
+                    }
+                    let apply_label = if self.session_id.is_some() {
+                        "Apply && Reconnect"
+                    } else {
+                        "Apply"
+                    };
+                    if ui.button(apply_label).clicked() {
+                        let session_id = self.session_id.clone();
+                        let shell = if self.shell.trim().is_empty() {
+                            None
+                        } else {
+                            Some(self.shell.trim().to_string())
+                        };
+                        let working_dir = if self.working_dir.trim().is_empty() {
+                            None
+                        } else {
+                            Some(self.working_dir.trim().to_string())
+                        };
+
+                        let mut config = if let Some(id) = &self.profile_id {
+                            connections
+                                .iter()
+                                .find(|c| c.id == *id)
+                                .cloned()
+                                .unwrap_or_else(|| {
+                                    SavedConnection::new_local("Local Terminal", shell.as_deref())
+                                })
+                        } else {
+                            SavedConnection::new_local("Local Terminal", shell.as_deref())
+                        };
+                        config.shell = shell;
+                        config.working_dir = working_dir;
+                        result = Some(LocalTerminalSettingsApply {
+                            session_id,
+                            config,
+                        });
+                        close = true;
+                    }
+                });
+            });
+
+        if close {
+            self.open = false;
+            *self = Self::default();
+        }
+
+        result
     }
 }

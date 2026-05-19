@@ -17,7 +17,6 @@ use crate::ui::terminal_mouse::{process_terminal_mouse, process_terminal_wheel};
 use crate::ui::terminal_selection::{
     CellPos, TerminalSelection, paint_selection, paste_payload, update_terminal_selection,
 };
-
 pub struct ActiveSession {
     pub id: String,
     pub conn_type: ConnectionType,

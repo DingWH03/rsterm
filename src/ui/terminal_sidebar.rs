@@ -1,4 +1,4 @@
-use crate::ui::connection_view::ActiveSession;
+use crate::session::WorkspaceSession;
 use crate::ui::sidebar::Sidebar;
 use crate::ui::sidebar::SidebarPage;
 use crate::ui::sidebar_common::{sidebar_brand_row, sidebar_sessions_panel, SidebarSessionAction};
@@ -15,7 +15,7 @@ pub fn terminal_sidebar(
     ui: &mut egui::Ui,
     sidebar: &mut Sidebar,
     settings_open: &mut bool,
-    sessions: &[ActiveSession],
+    sessions: &[WorkspaceSession],
     active_id: Option<&str>,
 ) -> TerminalSidebarAction {
     let mut action = TerminalSidebarAction {

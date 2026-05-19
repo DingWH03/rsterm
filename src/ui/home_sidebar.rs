@@ -1,4 +1,4 @@
-use crate::ui::connection_view::ActiveSession;
+use crate::session::WorkspaceSession;
 use crate::ui::sidebar::Sidebar;
 use crate::ui::sidebar::SidebarPage;
 use crate::ui::sidebar_common::{sidebar_brand_row, sidebar_sessions_panel, SidebarSessionAction};
@@ -21,7 +21,7 @@ pub fn paint_home_sidebar(
     in_overlay: bool,
     on_home: bool,
     on_settings: bool,
-    sessions: &[ActiveSession],
+    sessions: &[WorkspaceSession],
     active_session_id: Option<&str>,
 ) -> HomeSidebarResult {
     let show_ham = in_overlay && sidebar.show_panel_hamburger(SidebarPage::Home);

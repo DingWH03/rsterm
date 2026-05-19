@@ -68,6 +68,13 @@ pub fn connect_local(
         cmd.env(key, value);
     }
 
+    if let Some(dir) = config.working_dir.as_deref() {
+        let path = std::path::Path::new(dir);
+        if path.is_dir() {
+            cmd.cwd(path);
+        }
+    }
+
     let child = pair
         .slave
         .spawn_command(cmd)
