@@ -70,8 +70,7 @@ pub fn connect_serial(config: &SavedConnection) -> Result<ConnectionHandle, Stri
                 Ok(ConnOut::Resize(_, _)) | Ok(ConnOut::Winch) => {}
                 Ok(ConnOut::Close) => {
                     writer_alive.store(false, Ordering::Relaxed);
-                    let _ = from_conn_tx
-                        .send(ConnIn::StateChanged(ConnectionState::Disconnected));
+                    let _ = from_conn_tx.send(ConnIn::StateChanged(ConnectionState::Closed));
                     return;
                 }
                 Err(_) => {

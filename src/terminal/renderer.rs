@@ -31,27 +31,65 @@ impl TerminalRenderer {
     }
 
     pub fn set_font_size(&mut self, size: f32) {
+        #[cfg(target_os = "android")]
+        let size = size.round();
         self.font_size = size;
     }
 
+    /// One terminal column width/height in points (must fit wide/CJK glyphs in 2 columns).
     pub fn measure_cell(ui: &egui::Ui, font_size: f32) -> (f32, f32) {
         let font_id = egui::FontId::monospace(font_size);
         ui.fonts(|f| {
-            let width_galley = f.layout(
-                "M".to_string(),
-                font_id.clone(),
-                egui::Color32::WHITE,
-                f32::INFINITY,
-            );
-            // Include descenders so the last screen row is not clipped by the paint rect.
-            let height_galley = f.layout(
-                "Wg".to_string(),
-                font_id,
-                egui::Color32::WHITE,
-                f32::INFINITY,
-            );
-            let cell_h = height_galley.rect.height().max(font_size * 1.2);
-            (width_galley.rect.width(), cell_h)
+            let latin_w = f
+                .layout(
+                    "M".to_string(),
+                    font_id.clone(),
+                    egui::Color32::WHITE,
+                    f32::INFINITY,
+                )
+                .rect
+                .width();
+            // CJK occupies two columns; half the shaped width is one column.
+            let cjk_w = f
+                .layout(
+                    "汉".to_string(),
+                    font_id.clone(),
+                    egui::Color32::WHITE,
+                    f32::INFINITY,
+                )
+                .rect
+                .width()
+                / 2.0;
+            let mut cell_w = latin_w.max(cjk_w).max(1.0);
+
+            let h_latin = f
+                .layout(
+                    "Wg".to_string(),
+                    font_id.clone(),
+                    egui::Color32::WHITE,
+                    f32::INFINITY,
+                )
+                .rect
+                .height();
+            let h_cjk = f
+                .layout(
+                    "汉".to_string(),
+                    font_id,
+                    egui::Color32::WHITE,
+                    f32::INFINITY,
+                )
+                .rect
+                .height();
+            let mut cell_h = h_latin.max(h_cjk).max(font_size * 1.2);
+
+            // Android system fonts are often not fixed-pitch; round up to reduce clipping.
+            #[cfg(target_os = "android")]
+            {
+                cell_w = cell_w.ceil();
+                cell_h = cell_h.ceil();
+            }
+
+            (cell_w, cell_h)
         })
     }
 

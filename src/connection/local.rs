@@ -107,7 +107,8 @@ pub fn connect_local(
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => {
-                    let _ = reader_from_tx.send(ConnIn::StateChanged(ConnectionState::Disconnected));
+                    let _ = reader_from_tx
+                        .send(ConnIn::StateChanged(ConnectionState::Closed));
                     return;
                 }
                 Ok(n) => {
@@ -140,7 +141,9 @@ pub fn connect_local(
             match to_conn_rx.recv_timeout(Duration::from_millis(10)) {
                 Ok(ConnOut::Data(data)) => {
                     if writer.write_all(&data).is_err() {
-                        let _ = writer_from_tx.send(ConnIn::StateChanged(ConnectionState::Disconnected));
+                        let _ = writer_from_tx.send(ConnIn::StateChanged(ConnectionState::Lost(
+                            "Connection lost.".into(),
+                        )));
                         return;
                     }
                     let _ = writer.flush();
@@ -152,7 +155,8 @@ pub fn connect_local(
                     signal_winch_if_needed(&*master, shell_pid);
                 }
                 Ok(ConnOut::Close) => {
-                    let _ = writer_from_tx.send(ConnIn::StateChanged(ConnectionState::Disconnected));
+                    let _ = writer_from_tx
+                        .send(ConnIn::StateChanged(ConnectionState::Closed));
                     return;
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}

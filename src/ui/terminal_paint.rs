@@ -162,7 +162,12 @@ pub fn paint_row(
 
         if cell.ch != ' ' {
             let galley = layout_glyph(ui, cache, font_id, font_size, theme, cell.ch, attrs);
-            painter.galley(egui::pos2(x, y), galley, egui::Color32::WHITE);
+            let cell_pixel_w = cell_w * span as f32;
+            let glyph_w = galley.size().x;
+            let x_paint = x + ((cell_pixel_w - glyph_w).max(0.0) * 0.5);
+            painter
+                .with_clip_rect(cell_rect)
+                .galley(egui::pos2(x_paint, y), galley, egui::Color32::WHITE);
         } else if attrs.underline {
             // Highlight plugins may underline spaces in a command span.
             let (_, bg) = resolve_colors(theme, attrs);

@@ -138,6 +138,7 @@ async fn run_ssh(
 
     let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Connected));
 
+    let mut clean_close = false;
     loop {
         tokio::select! {
             msg = channel.wait() => {
@@ -148,9 +149,11 @@ async fn run_ssh(
                     Some(ChannelMsg::ExtendedData { data, .. }) => {
                         emit_conn_data(&from_tx, &repaint, data.to_vec());
                     }
-                    Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => {
+                    Some(ChannelMsg::Eof) => {
+                        clean_close = true;
                         break;
                     }
+                    Some(ChannelMsg::Close) | None => break,
                     _ => {}
                 }
             }
@@ -167,7 +170,11 @@ async fn run_ssh(
                             .await;
                     }
                     Some(ConnOut::Winch) => {}
-                    Some(ConnOut::Close) | None => break,
+                    Some(ConnOut::Close) => {
+                        clean_close = true;
+                        break;
+                    }
+                    None => break,
                 }
             }
         }
@@ -177,7 +184,12 @@ async fn run_ssh(
     let _ = handle
         .disconnect(Disconnect::ByApplication, "", "English")
         .await;
-    let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Disconnected));
+    let end = if clean_close {
+        ConnectionState::Closed
+    } else {
+        ConnectionState::Lost("Connection lost.".into())
+    };
+    let _ = from_tx.send(ConnIn::StateChanged(end));
     Ok(())
 }
 

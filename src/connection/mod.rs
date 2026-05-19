@@ -1,4 +1,5 @@
 pub mod ble;
+#[cfg(not(target_os = "android"))]
 pub mod local;
 pub mod pty_burst;
 pub mod ssh_keys;
@@ -14,7 +15,11 @@ use std::sync::{Arc, Mutex};
 pub enum ConnectionState {
     Connecting,
     Connected,
-    Disconnected,
+    /// Normal end: shell exit (EOF), Ctrl+D, user closed the tab.
+    Closed,
+    /// Link dropped without a clean EOF (network reset, broken pipe, etc.).
+    Lost(String),
+    /// Failed to connect or authenticate.
     Error(String),
 }
 
@@ -23,7 +28,8 @@ impl fmt::Display for ConnectionState {
         match self {
             ConnectionState::Connecting => write!(f, "Connecting..."),
             ConnectionState::Connected => write!(f, "Connected"),
-            ConnectionState::Disconnected => write!(f, "Disconnected"),
+            ConnectionState::Closed => write!(f, "Closed"),
+            ConnectionState::Lost(m) => write!(f, "Lost: {m}"),
             ConnectionState::Error(e) => write!(f, "Error: {e}"),
         }
     }
@@ -107,6 +113,7 @@ pub struct ConnectionHandle {
     blocking_resize: Option<std::sync::mpsc::SyncSender<(u16, u16)>>,
     _reader_thread: Option<std::thread::JoinHandle<()>>,
     _writer_thread: Option<std::thread::JoinHandle<()>>,
+    #[cfg(not(target_os = "android"))]
     _pty_child: Option<Box<dyn portable_pty::Child + Send + Sync>>,
 }
 
@@ -127,10 +134,12 @@ impl ConnectionHandle {
             blocking_resize: None,
             _reader_thread: Some(reader_thread),
             _writer_thread: Some(writer_thread),
+            #[cfg(not(target_os = "android"))]
             _pty_child: None,
         }
     }
 
+    #[cfg(not(target_os = "android"))]
     pub fn with_pty_child(mut self, child: Box<dyn portable_pty::Child + Send + Sync>) -> Self {
         self.shell_pid = child.process_id();
         self._pty_child = Some(child);

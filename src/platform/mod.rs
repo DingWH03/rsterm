@@ -25,7 +25,8 @@ pub struct Capabilities {
 
 pub fn capabilities() -> Capabilities {
     Capabilities {
-        local_terminal: cfg!(any(windows, unix)),
+        // portable-pty has no Android backend; local shell is desktop-only.
+        local_terminal: cfg!(any(windows, all(unix, not(target_os = "android")))),
         ssh: true,
         serial: true,
         ble: cfg!(any(

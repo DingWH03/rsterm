@@ -1,3 +1,4 @@
+use crate::platform;
 use crate::storage::types::{ConnectionType, SavedConnection};
 
 /// Direct actions from per-card toolbar icons (not context menus).
@@ -23,23 +24,25 @@ pub fn home_screen(
 ) {
     let _ = settings_clicked;
 
-    let (local_body, local_file) =
-        render_local_terminal_card(ui, selected_conn_id.is_none(), card_menu);
-    if local_body.clicked() && !local_file.clicked() {
-        *selected_conn_id = None;
-        *local_clicked = true;
-    }
-    local_body.context_menu(|ui| {
-        if ui.button("Connect").clicked() {
+    if platform::capabilities().local_terminal {
+        let (local_body, local_file) =
+            render_local_terminal_card(ui, selected_conn_id.is_none(), card_menu);
+        if local_body.clicked() && !local_file.clicked() {
+            *selected_conn_id = None;
             *local_clicked = true;
-            ui.close_menu();
         }
-        if ui.button("File Manager").clicked() {
-            card_menu.local_fm = true;
-            ui.close_menu();
-        }
-    });
-    ui.add_space(8.0);
+        local_body.context_menu(|ui| {
+            if ui.button("Connect").clicked() {
+                *local_clicked = true;
+                ui.close_menu();
+            }
+            if ui.button("File Manager").clicked() {
+                card_menu.local_fm = true;
+                ui.close_menu();
+            }
+        });
+        ui.add_space(8.0);
+    }
 
     if connections.is_empty() {
         ui.add_space(20.0);

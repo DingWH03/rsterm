@@ -30,3 +30,20 @@ cargo install cross cargo-deb --locked
 ```
 
 Output: `dist/rsterm_<version>-1_<arch>.deb`
+
+## Android APK
+
+Requires [Android SDK + NDK](https://developer.android.com/ndk), `rustup target add aarch64-linux-android`, and `cargo install cargo-ndk`. 
+
+```bash
+source packaging/android-env.sh
+./packaging/build-apk.sh          # debug APK
+./packaging/build-apk.sh release  # release APK
+```
+
+Install:
+
+```bash
+adb install -r dist/rsterm-android-arm64-release.apk
+```
+

@@ -6,6 +6,15 @@ description = "Multi terminal emulator with SSH, serial, BLE, and dual-pane file
 license = "MIT"
 readme = "README.md"
 
+[lib]
+name = "rsterm"
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "rsterm"
+path = "src/main.rs"
+
 [profile.release]
 strip = "symbols"
 
@@ -26,7 +35,6 @@ assets = [
 ]
 
 [dependencies]
-eframe = "0.31"
 egui = { version = "0.31", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -37,14 +45,23 @@ russh = "0.53"
 russh-sftp = "2.1"
 serialport = "4"
 tokio = { version = "1", features = ["full"] }
-portable-pty = "0.8"
 btleplug = "0.11"
 uuid = { version = "1", features = ["v4"] }
-arboard = { version = "3" }
 unicode-width = "0.2"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+eframe = "0.31"
+portable-pty = "0.8"
+arboard = { version = "3" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 arboard = { version = "3", features = ["wayland-data-control"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "android-native-activity"] }
+android_logger = "0.14"
+android_clipboard = "0.1"
+winit = { version = "0.30", features = ["android-native-activity"] }

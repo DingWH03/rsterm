@@ -6,7 +6,7 @@ use crate::platform::{foreground_command, title_is_idle_host, truncate_label};
 use crate::storage::types::ConnectionType;
 use crate::terminal::parser::TermEvent;
 use crate::terminal::renderer::TerminalRenderer;
-use crate::ui::clipboard::read_text;
+use crate::ui::clipboard::{read_text, write_text};
 use crate::ui::keyboard::VirtualKeyboard;
 use crate::ui::sidebar::{Sidebar, SidebarPage};
 use crate::ui::terminal_input::{
@@ -216,6 +216,12 @@ pub fn connection_view(
     if let Some(session) = session.as_mut() {
         if let Some(msg) = session.disconnect_message.clone() {
             let mut close = false;
+            let lost = matches!(session.handle.state, ConnectionState::Lost(_));
+            let title = if lost {
+                "Disconnected"
+            } else {
+                "Connection failed"
+            };
             egui::Frame::new()
                 .fill(egui::Color32::from_rgba_unmultiplied(20, 20, 20, 240))
                 .show(ui, |ui| {
@@ -223,7 +229,7 @@ pub fn connection_view(
                     ui.vertical_centered(|ui| {
                         ui.add_space(term_h * 0.25);
                         ui.label(
-                            egui::RichText::new("Connection failed")
+                            egui::RichText::new(title)
                                 .size(18.0)
                                 .strong()
                                 .color(egui::Color32::from_rgb(255, 120, 120)),
@@ -306,6 +312,7 @@ pub fn connection_view(
             if let Some(ref sel) = session.selection {
                 let text = sel.text(&session.terminal.screen);
                 if !text.is_empty() {
+                    write_text(&text);
                     ctx.copy_text(text);
                 }
                 session.selection = None;
@@ -328,6 +335,7 @@ pub fn connection_view(
                 if let Some(ref sel) = session.selection {
                     let text = sel.text(&session.terminal.screen);
                     if !text.is_empty() {
+                        write_text(&text);
                         ctx.copy_text(text);
                     }
                     session.selection = None;
@@ -709,11 +717,12 @@ pub(crate) fn drain_connection(session: &mut ActiveSession, action: &mut Connect
                     ConnectionState::Error(e) => {
                         session.disconnect_message = Some(e);
                     }
-                    ConnectionState::Disconnected => {
-                        if session.disconnect_message.is_none() {
-                            session.disconnect_message =
-                                Some("Connection closed.".to_string());
-                        }
+                    ConnectionState::Lost(m) => {
+                        session.disconnect_message = Some(m);
+                    }
+                    ConnectionState::Closed => {
+                        session.disconnect_message = None;
+                        *action = ConnectionViewAction::CloseSession;
                     }
                     ConnectionState::Connected => {
                         session.disconnect_message = None;

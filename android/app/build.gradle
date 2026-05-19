@@ -1,0 +1,64 @@
+plugins {
+    id "com.android.application"
+}
+
+def signingProps = new Properties()
+def signingPropsFile = rootProject.file("signing.properties")
+if (signingPropsFile.exists()) {
+    signingProps.load(new FileInputStream(signingPropsFile))
+}
+
+def releaseKeystore = signingProps["storeFile"]
+        ? rootProject.file(signingProps["storeFile"])
+        : null
+
+android {
+    namespace "dev.rsterm.app"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "dev.rsterm.app"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "0.1.0"
+    }
+
+    signingConfigs {
+        release {
+            if (releaseKeystore != null && releaseKeystore.exists()) {
+                storeFile releaseKeystore
+                storePassword signingProps["storePassword"]
+                keyAlias signingProps["keyAlias"]
+                keyPassword signingProps["keyPassword"]
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (releaseKeystore != null && releaseKeystore.exists()) {
+                signingConfig signingConfigs.release
+            }
+        }
+        debug {
+            minifyEnabled false
+            if (releaseKeystore != null && releaseKeystore.exists()) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ["src/main/jniLibs"]
+        }
+    }
+}

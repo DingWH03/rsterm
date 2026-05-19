@@ -1,4 +1,6 @@
-use crate::connection::{ble, local, serial, ssh};
+use crate::connection::{ble, serial, ssh};
+#[cfg(not(target_os = "android"))]
+use crate::connection::local;
 use crate::settings::{AppSettings, save_settings};
 use crate::storage;
 use crate::storage::types::{ConnectionType, SavedConnection};
@@ -130,6 +132,7 @@ impl RstermApp {
             .unwrap_or_else(|| SavedConnection::new_local("Local Terminal", None))
     }
 
+    #[cfg(not(target_os = "android"))]
     fn connect_local(&mut self) {
         let profile = self.settings.default_profile().clone();
         let config = self.effective_local_config();
@@ -139,6 +142,7 @@ impl RstermApp {
         }
     }
 
+    #[cfg(not(target_os = "android"))]
     fn reconnect_local_session(&mut self, session_id: &str, config: &SavedConnection) {
         let Some(idx) = self.sessions.iter().position(|s| s.id() == session_id) else {
             return;
@@ -187,6 +191,7 @@ impl RstermApp {
             self.settings.default_local_connection_id = Some(apply.config.id.clone());
             save_settings(&self.settings);
         }
+        #[cfg(not(target_os = "android"))]
         if let Some(session_id) = &apply.session_id {
             self.reconnect_local_session(session_id, &apply.config);
         }
@@ -199,7 +204,10 @@ impl RstermApp {
         };
         let profile = self.settings.default_profile().clone();
         let result = match config.conn_type {
+            #[cfg(not(target_os = "android"))]
             ConnectionType::Local => local::connect_local(&config, &profile, 24, 80),
+            #[cfg(target_os = "android")]
+            ConnectionType::Local => Err("Local terminal is not supported on Android".into()),
             ConnectionType::Ssh => ssh::connect_ssh(&config, &self.settings.ssh_env_vars, 24, 80),
             ConnectionType::Serial => serial::connect_serial(&config),
             ConnectionType::Ble => ble::connect_ble(&config),
@@ -306,6 +314,7 @@ impl RstermApp {
 
     fn open_new_window_for_session(&mut self, session_id: &str) {
         enum DupPlan {
+            #[cfg(not(target_os = "android"))]
             TerminalLocal,
             TerminalSsh(String),
             FileSsh(String),
@@ -314,7 +323,10 @@ impl RstermApp {
         let plan = self.sessions.iter().find(|s| s.id() == session_id).and_then(|s| {
             match s {
                 WorkspaceSession::Terminal(term) => match term.conn_type {
+                    #[cfg(not(target_os = "android"))]
                     ConnectionType::Local => Some(DupPlan::TerminalLocal),
+                    #[cfg(target_os = "android")]
+                    ConnectionType::Local => None,
                     ConnectionType::Ssh => term
                         .saved_conn_id
                         .clone()
@@ -331,6 +343,7 @@ impl RstermApp {
             }
         });
         match plan {
+            #[cfg(not(target_os = "android"))]
             Some(DupPlan::TerminalLocal) => self.connect_local(),
             Some(DupPlan::TerminalSsh(id)) => self.connect_to(&id),
             Some(DupPlan::FileSsh(id)) => self.open_file_manager_ssh(&id),
@@ -494,6 +507,7 @@ impl eframe::App for RstermApp {
                     self.apply_local_terminal_settings(apply);
                 }
 
+                #[cfg(not(target_os = "android"))]
                 if local_clicked {
                     self.connect_local();
                 }
@@ -623,6 +637,7 @@ impl eframe::App for RstermApp {
                             ui.add_space(40.0);
                             ui.label("No active terminal");
                             ui.add_space(8.0);
+                            #[cfg(not(target_os = "android"))]
                             if ui.button("Open Local Terminal").clicked() {
                                 self.connect_local();
                             }

@@ -159,10 +159,51 @@ jobs:
           path: dist/*.deb
           if-no-files-found: error
 
+  android:
+    name: Android APK (arm64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          # NDK revision may differ from your machine (e.g. 30.x locally, 27.x on CI); both work with API 34.
+          sdkmanager \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "ndk;27.0.12077973"
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build APK
+        run: |
+          chmod +x packaging/build-apk.sh packaging/android-env.sh
+          ./packaging/build-apk.sh release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rsterm-android-arm64
+          path: dist/rsterm-android-arm64-release.apk
+          if-no-files-found: error
+
   release:
     name: GitHub Release assets
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, windows, deb]
+    needs: [linux, windows, deb, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
