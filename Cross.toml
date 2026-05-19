@@ -1,26 +1,9 @@
 # Native deps for `cross build` (i386 / armhf .deb jobs).
 # `$CROSS_DEB_ARCH` is set by cross (i386, armhf, …).
-# See: https://github.com/cross-rs/cross/wiki
 
 [build]
 pre-build = [
     "dpkg --add-architecture $CROSS_DEB_ARCH",
     "apt-get update",
-    "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        pkg-config:$CROSS_DEB_ARCH \
-        libdbus-1-dev:$CROSS_DEB_ARCH \
-        libxcb1-dev:$CROSS_DEB_ARCH \
-        libxcb-render0-dev:$CROSS_DEB_ARCH \
-        libxcb-shape0-dev:$CROSS_DEB_ARCH \
-        libxcb-xfixes0-dev:$CROSS_DEB_ARCH \
-        libxkbcommon-dev:$CROSS_DEB_ARCH \
-        libasound2-dev:$CROSS_DEB_ARCH \
-        libudev-dev:$CROSS_DEB_ARCH \
-        libwayland-dev:$CROSS_DEB_ARCH \
-        libx11-dev:$CROSS_DEB_ARCH \
-        libxi-dev:$CROSS_DEB_ARCH \
-        libxrandr-dev:$CROSS_DEB_ARCH \
-        libegl1-mesa-dev:$CROSS_DEB_ARCH \
-        libfontconfig1-dev:$CROSS_DEB_ARCH \
-        libfreetype6-dev:$CROSS_DEB_ARCH",
+    "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config:$CROSS_DEB_ARCH libdbus-1-dev:$CROSS_DEB_ARCH libxcb1-dev:$CROSS_DEB_ARCH libxcb-render0-dev:$CROSS_DEB_ARCH libxcb-shape0-dev:$CROSS_DEB_ARCH libxcb-xfixes0-dev:$CROSS_DEB_ARCH libxkbcommon-dev:$CROSS_DEB_ARCH libasound2-dev:$CROSS_DEB_ARCH libudev-dev:$CROSS_DEB_ARCH libwayland-dev:$CROSS_DEB_ARCH libx11-dev:$CROSS_DEB_ARCH libxi-dev:$CROSS_DEB_ARCH libxrandr-dev:$CROSS_DEB_ARCH libegl1-mesa-dev:$CROSS_DEB_ARCH libfontconfig1-dev:$CROSS_DEB_ARCH libfreetype6-dev:$CROSS_DEB_ARCH",
 ]
