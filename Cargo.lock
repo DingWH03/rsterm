@@ -3937,7 +3937,7 @@ dependencies = [
 
 [[package]]
 name = "rsterm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "android_clipboard",
  "android_logger",
