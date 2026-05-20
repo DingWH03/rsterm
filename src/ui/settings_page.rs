@@ -88,6 +88,7 @@ enum SettingsLayout {
 }
 
 fn settings_scroll_body(ui: &mut egui::Ui, settings: &mut AppSettings, layout: SettingsLayout) {
+    let scroll_w = page_content_width(ui);
     egui::ScrollArea::vertical()
         .id_salt(match layout {
             SettingsLayout::Home => "settings_page_scroll",
@@ -95,10 +96,13 @@ fn settings_scroll_body(ui: &mut egui::Ui, settings: &mut AppSettings, layout: S
         })
         .auto_shrink([false; 2])
         .show(ui, |ui| {
+            ui.set_width(scroll_w);
+            ui.set_max_width(scroll_w);
             ui.push_id(match layout {
                 SettingsLayout::Home => "home",
                 SettingsLayout::Workspace => "workspace",
             }, |ui| {
+                fill_page_width(ui);
                 settings_page_body(ui, settings);
             });
         });
@@ -116,31 +120,53 @@ impl Default for TabState {
     }
 }
 
-fn tab_bar(ui: &mut egui::Ui, state: &mut TabState) {
-    ui.horizontal(|ui| {
-        for tab in SettingsTab::ALL {
-            let label = tab.label();
-            let selected = state.active_tab == tab;
-            let mut btn = egui::Button::new(egui::RichText::new(&label).size(13.0));
-            if selected {
-                btn = btn.fill(ui.visuals().selection.bg_fill);
-            }
-            if ui.add(btn).clicked() {
-                state.active_tab = tab;
-            }
+fn paint_tab_buttons(ui: &mut egui::Ui, state: &mut TabState) {
+    for tab in SettingsTab::ALL {
+        let label = tab.label();
+        let selected = state.active_tab == tab;
+        let mut btn = egui::Button::new(egui::RichText::new(&label).size(13.0));
+        if selected {
+            btn = btn.fill(ui.visuals().selection.bg_fill);
         }
-    });
+        if ui.add(btn).clicked() {
+            state.active_tab = tab;
+        }
+    }
+}
+
+fn tab_bar(ui: &mut egui::Ui, layout: SettingsFormLayout, state: &mut TabState) {
+    if layout.use_tab_scroll() {
+        // Shrink height to tab row only; [false, true] avoids eating space below the tabs.
+        egui::ScrollArea::horizontal()
+            .id_salt("settings_tabs_scroll")
+            .auto_shrink(egui::Vec2b::new(false, true))
+            .max_height(36.0)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    paint_tab_buttons(ui, state);
+                });
+            });
+    } else {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            paint_tab_buttons(ui, state);
+        });
+    }
     ui.add_space(8.0);
     ui.separator();
     ui.add_space(8.0);
 }
 
 pub fn settings_page_body(ui: &mut egui::Ui, settings: &mut AppSettings) {
+    fill_page_width(ui);
+    let layout = SettingsFormLayout::from_ui(ui);
+
     let mut state: TabState = ui.memory_mut(|mem|
         mem.data.get_persisted::<TabState>(ui.id().with("settings_tab_state"))
     ).unwrap_or_default();
 
-    tab_bar(ui, &mut state);
+    tab_bar(ui, layout, &mut state);
 
     if state.selected_profile >= settings.profiles.len() {
         state.selected_profile = 0;
@@ -161,56 +187,245 @@ pub fn settings_page_body(ui: &mut egui::Ui, settings: &mut AppSettings) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  UNIFIED SETTING WIDGETS
+//  UNIFIED FORM LAYOUT
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Width reserved for the label column so all rows align.
-const LABEL_WIDTH: f32 = 160.0;
+const FORM_LABEL_SIZE: f32 = 13.0;
+const FORM_GROUP_SIZE: f32 = 12.0;
+const FORM_ROW_GAP_NARROW: f32 = 8.0;
 
-/// A section card with title + optional subtitle.
-fn section(ui: &mut egui::Ui, title: &str, subtitle: &str, add_body: impl FnOnce(&mut egui::Ui)) {
-    egui::Frame::new()
-        .fill(ui.visuals().extreme_bg_color)
-        .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
-        .corner_radius(egui::CornerRadius::same(8))
-        .inner_margin(egui::Margin::symmetric(12, 10))
-        .show(ui, |ui| {
-            ui.label(egui::RichText::new(title).size(14.0).strong());
-            if !subtitle.is_empty() {
-                ui.label(egui::RichText::new(subtitle).size(11.0).weak());
-            }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FormLayoutMode {
+    Wide,
+    Narrow,
+}
+
+#[derive(Clone, Copy)]
+struct SettingsFormLayout {
+    width: f32,
+    mode: FormLayoutMode,
+    label_col_max: f32,
+}
+
+impl SettingsFormLayout {
+    const NARROW_BREAKPOINT: f32 = 480.0;
+    const TAB_SCROLL_BREAKPOINT: f32 = 560.0;
+
+    fn from_ui(ui: &egui::Ui) -> Self {
+        let width = ui.available_width().max(1.0);
+        let mode = if width < Self::NARROW_BREAKPOINT {
+            FormLayoutMode::Narrow
+        } else {
+            FormLayoutMode::Wide
+        };
+        let label_col_max = (width * 0.36).clamp(88.0, 180.0);
+        Self { width, mode, label_col_max }
+    }
+
+    fn is_wide(self) -> bool {
+        self.mode == FormLayoutMode::Wide
+    }
+
+    fn use_tab_scroll(self) -> bool {
+        self.width < Self::TAB_SCROLL_BREAKPOINT
+    }
+
+    fn form_label(text: &str) -> egui::RichText {
+        egui::RichText::new(text).size(FORM_LABEL_SIZE)
+    }
+
+    fn control_width(ui: &egui::Ui) -> f32 {
+        ui.available_width().max(48.0)
+    }
+
+    /// Standard two-column form inside a section card.
+    fn with_form_grid(
+        self,
+        ui: &mut egui::Ui,
+        id_salt: impl std::hash::Hash,
+        add_body: impl FnOnce(&mut egui::Ui, Self),
+    ) {
+        fill_page_width(ui);
+        if self.is_wide() {
+            egui::Grid::new(id_salt)
+                .num_columns(2)
+                .spacing([12.0, 6.0])
+                .min_col_width(48.0)
+                .max_col_width(self.label_col_max)
+                .show(ui, |ui| {
+                    fill_page_width(ui);
+                    add_body(ui, self);
+                });
+        } else {
+            add_body(ui, self);
+        }
+    }
+
+    fn form_row(self, ui: &mut egui::Ui, label: &str, add_widget: impl FnOnce(&mut egui::Ui, Self)) {
+        if self.is_wide() {
+            ui.label(Self::form_label(label));
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                add_widget(ui, self);
+            });
+            ui.end_row();
+        } else {
+            ui.label(Self::form_label(label));
+            ui.add_space(4.0);
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                ui.set_max_width(ui.available_width());
+                add_widget(ui, self);
+            });
+            ui.add_space(FORM_ROW_GAP_NARROW);
+        }
+    }
+
+    /// Full-width divider between row groups (inside the same grid).
+    fn form_divider(self, ui: &mut egui::Ui) {
+        if self.is_wide() {
+            ui.label("");
+            ui.separator();
+            ui.end_row();
+        } else {
+            ui.add_space(6.0);
+            ui.separator();
+            ui.add_space(6.0);
+        }
+    }
+
+    /// Subheading inside a form section (e.g. color groups).
+    fn form_group_heading(self, ui: &mut egui::Ui, text: &str) {
+        if self.is_wide() {
+            ui.label(egui::RichText::new(text).size(FORM_GROUP_SIZE).weak());
+            ui.label("");
+            ui.end_row();
+        } else {
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new(text).size(FORM_GROUP_SIZE).weak());
+            ui.add_space(2.0);
+        }
+    }
+
+    /// Action buttons spanning the value column (duplicate / export / create).
+    fn form_actions_row(self, ui: &mut egui::Ui, add_buttons: impl FnOnce(&mut egui::Ui)) {
+        if self.is_wide() {
+            ui.label("");
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.horizontal_wrapped(add_buttons);
+            });
+            ui.end_row();
+        } else {
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(add_buttons);
+            ui.add_space(FORM_ROW_GAP_NARROW);
+        }
+    }
+}
+
+/// Width shared by every settings card in the current column.
+fn page_content_width(ui: &egui::Ui) -> f32 {
+    ui.available_width().max(1.0)
+}
+
+fn fill_page_width(ui: &mut egui::Ui) {
+    let w = page_content_width(ui);
+    ui.set_width(w);
+    ui.set_max_width(w);
+}
+
+/// Allocate a full-width block so Frame + Grid cannot shrink narrower than siblings.
+fn section_shell(ui: &mut egui::Ui, title: &str, subtitle: &str, add_body: impl FnOnce(&mut egui::Ui)) {
+    let outer_w = page_content_width(ui);
+    ui.allocate_ui_with_layout(
+        egui::vec2(outer_w, 0.0),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            ui.set_width(outer_w);
+            ui.set_max_width(outer_w);
+            egui::Frame::new()
+                .fill(ui.visuals().extreme_bg_color)
+                .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                .corner_radius(egui::CornerRadius::same(8))
+                .inner_margin(egui::Margin::symmetric(12, 10))
+                .show(ui, |ui| {
+                    fill_page_width(ui);
+                    ui.label(egui::RichText::new(title).size(14.0).strong());
+                    if !subtitle.is_empty() {
+                        ui.label(egui::RichText::new(subtitle).size(11.0).weak());
+                        ui.add_space(6.0);
+                    } else {
+                        ui.add_space(8.0);
+                    }
+                    fill_page_width(ui);
+                    add_body(ui);
+                });
             ui.add_space(10.0);
-            add_body(ui);
-        });
-    ui.add_space(10.0);
+        },
+    );
 }
 
-/// A single setting row with a fixed-width label on the left and the widget on the right.
-fn row(ui: &mut egui::Ui, label: &str, add_widget: impl FnOnce(&mut egui::Ui)) {
-    ui.horizontal(|ui| {
-        ui.set_min_width(LABEL_WIDTH);
-        ui.label(egui::RichText::new(label).size(13.0));
-        ui.add(egui::Separator::default().vertical().spacing(8.0));
-        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            ui.set_min_width(ui.available_width());
-            add_widget(ui);
-        });
+fn section_card(
+    ui: &mut egui::Ui,
+    title: &str,
+    subtitle: &str,
+    add_body: impl FnOnce(&mut egui::Ui, SettingsFormLayout),
+) {
+    section_shell(ui, title, subtitle, |ui| {
+        let layout = SettingsFormLayout::from_ui(ui);
+        add_body(ui, layout);
     });
-    ui.add_space(6.0);
 }
 
-/// ── Concrete setting helpers ──
+/// Environment-variable card (simple row layout — no form grid).
+fn section_env_card(
+    ui: &mut egui::Ui,
+    title: &str,
+    subtitle: &str,
+    id_salt: &str,
+    vars: &mut std::collections::HashMap<String, String>,
+) {
+    section_shell(ui, title, subtitle, |ui| {
+        env_var_editor(ui, ui.id().with(id_salt), vars);
+    });
+}
 
-/// Slider setting (e.g. font size, line spacing).
-fn slider_row(ui: &mut egui::Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>) {
-    row(ui, label, |ui| {
+/// Section whose body is entirely standard form rows in one grid.
+fn section_form(
+    ui: &mut egui::Ui,
+    title: &str,
+    subtitle: &str,
+    grid_id: &str,
+    add_rows: impl FnOnce(&mut egui::Ui, SettingsFormLayout),
+) {
+    section_card(ui, title, subtitle, |ui, layout| {
+        layout.with_form_grid(ui, grid_id, add_rows);
+    });
+}
+
+// ─── Setting row helpers (always via form_row) ────────────────────────────────
+
+fn slider_row(
+    ui: &mut egui::Ui,
+    layout: SettingsFormLayout,
+    label: &str,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+) {
+    layout.form_row(ui, label, |ui, _| {
+        ui.set_max_width(SettingsFormLayout::control_width(ui));
         ui.add(egui::Slider::new(value, range).show_value(true));
     });
 }
 
-/// Integer slider (logarithmic).
-fn slider_row_usize(ui: &mut egui::Ui, label: &str, value: &mut usize, range: std::ops::RangeInclusive<usize>, logarithmic: bool) {
-    row(ui, label, |ui| {
+fn slider_row_usize(
+    ui: &mut egui::Ui,
+    layout: SettingsFormLayout,
+    label: &str,
+    value: &mut usize,
+    range: std::ops::RangeInclusive<usize>,
+    logarithmic: bool,
+) {
+    layout.form_row(ui, label, |ui, _| {
+        ui.set_max_width(SettingsFormLayout::control_width(ui));
         let mut s = egui::Slider::new(value, range).show_value(true);
         if logarithmic {
             s = s.logarithmic(true);
@@ -219,25 +434,25 @@ fn slider_row_usize(ui: &mut egui::Ui, label: &str, value: &mut usize, range: st
     });
 }
 
-/// Checkbox toggle.
-fn toggle_row(ui: &mut egui::Ui, label: &str, value: &mut bool) {
-    row(ui, label, |ui| {
+fn toggle_row(ui: &mut egui::Ui, layout: SettingsFormLayout, label: &str, value: &mut bool) {
+    layout.form_row(ui, label, |ui, _| {
         ui.checkbox(value, "");
     });
 }
 
-/// Combo-box (dropdown) selector.
 fn combo_row<T: PartialEq + Copy + 'static>(
     ui: &mut egui::Ui,
+    layout: SettingsFormLayout,
     label: &str,
     current: &mut T,
     options: &[T],
     display: fn(T) -> String,
     id_salt: &str,
 ) {
-    row(ui, label, |ui| {
+    layout.form_row(ui, label, |ui, _| {
         egui::ComboBox::from_id_salt(id_salt)
             .selected_text(display(*current))
+            .width(SettingsFormLayout::control_width(ui))
             .show_ui(ui, |ui| {
                 for &opt in options {
                     let d = display(opt);
@@ -249,16 +464,17 @@ fn combo_row<T: PartialEq + Copy + 'static>(
     });
 }
 
-/// Radio-button group (horizontal).
 fn radio_group<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
+    layout: SettingsFormLayout,
     label: &str,
     current: &mut T,
     options: &[T],
     display: fn(T) -> String,
 ) {
-    row(ui, label, |ui| {
-        ui.horizontal(|ui| {
+    layout.form_row(ui, label, |ui, _| {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
             for &opt in options {
                 let d = display(opt);
                 if ui.selectable_label(*current == opt, d).clicked() {
@@ -269,113 +485,42 @@ fn radio_group<T: PartialEq + Copy>(
     });
 }
 
-/// Single-line text input.
-fn text_row(ui: &mut egui::Ui, label: &str, value: &mut String, hint: &str, width: f32) {
-    row(ui, label, |ui| {
-        ui.add(egui::TextEdit::singleline(value).hint_text(hint).desired_width(width));
-    });
-}
-
-/// Color edit button + hex label.
-fn color_row(ui: &mut egui::Ui, label: &str, color: &mut egui::Color32) {
-    row(ui, label, |ui| {
-        let mut rgb = [
-            color.r() as f32 / 255.0,
-            color.g() as f32 / 255.0,
-            color.b() as f32 / 255.0,
-        ];
-        if ui.color_edit_button_rgb(&mut rgb).changed() {
-            *color = egui::Color32::from_rgb(
-                (rgb[0] * 255.0) as u8,
-                (rgb[1] * 255.0) as u8,
-                (rgb[2] * 255.0) as u8,
-            );
-        }
-        ui.monospace(format!("#{:02X}{:02X}{:02X}", color.r(), color.g(), color.b()));
-    });
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  TAB CONTENT
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// ─── General Tab ──────────────────────────────────────────────────────────────
-
-fn general_tab(ui: &mut egui::Ui, settings: &mut AppSettings) {
-    section(ui, &rust_i18n::t!("language"), "", |ui| {
-        language_selector(ui, settings);
-    });
-
-    section(ui, &rust_i18n::t!("ui_theme"), "", |ui| {
-        ui_theme_selector(ui, settings);
-    });
-
-    section(
-        ui,
-        &rust_i18n::t!("settings_section_ssh_env"),
-        &rust_i18n::t!("settings_section_ssh_env_desc"),
-        |ui| ssh_env_editor(ui, settings),
-    );
-}
-
-// ─── Profiles Tab ─────────────────────────────────────────────────────────────
-
-fn profiles_tab(ui: &mut egui::Ui, settings: &mut AppSettings, state: &mut TabState) {
-    section(ui, &rust_i18n::t!("settings_section_profiles"), &rust_i18n::t!("settings_section_profiles_desc"), |ui| {
-        profile_selector(ui, settings, state);
-    });
-
-    if settings.profiles.is_empty() {
-        return;
-    }
-
-    let profile_idx = state.selected_profile;
-    let is_default = settings.default_profile_name == settings.profiles[profile_idx].name;
-
-    if let Some(profile) = settings.profiles.get_mut(profile_idx) {
-        section(
-            ui,
-            &format!("{}: {}", rust_i18n::t!("settings_profile_detail"), profile.name),
-            "",
-            |ui| {
-                profile_detail_editor(ui, profile, profile_idx, is_default);
-            },
+fn text_row(ui: &mut egui::Ui, layout: SettingsFormLayout, label: &str, value: &mut String, hint: &str) {
+    layout.form_row(ui, label, |ui, _| {
+        ui.add(
+            egui::TextEdit::singleline(value)
+                .hint_text(hint)
+                .desired_width(SettingsFormLayout::control_width(ui)),
         );
-    }
+    });
 }
 
-fn profile_detail_editor(
-    ui: &mut egui::Ui,
-    profile: &mut Profile,
-    _profile_idx: usize,
-    is_default: bool,
-) {
-    text_row(ui, &rust_i18n::t!("settings_profile_name"), &mut profile.name, "", 200.0);
-    text_row(ui, &rust_i18n::t!("settings_profile_description"), &mut profile.description, "", 200.0);
-
-    if is_default {
-        ui.add_space(4.0);
-        ui.label(egui::RichText::new(rust_i18n::t!("settings_current_default")).color(ui.visuals().weak_text_color()));
-    }
-
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        if ui.button(rust_i18n::t!("settings_duplicate_profile")).clicked() {
-            let new_name = format!("{} (Copy)", profile.name);
-            let _copy = profile.duplicate(&new_name);
-        }
-        if ui.button(rust_i18n::t!("settings_export_profile")).clicked() {
-            if let Ok(json) = profile.export_json() {
-                ui.ctx().copy_text(json);
+fn color_row(ui: &mut egui::Ui, layout: SettingsFormLayout, label: &str, color: &mut egui::Color32) {
+    layout.form_row(ui, label, |ui, _| {
+        ui.horizontal(|ui| {
+            let mut rgb = [
+                color.r() as f32 / 255.0,
+                color.g() as f32 / 255.0,
+                color.b() as f32 / 255.0,
+            ];
+            if ui.color_edit_button_rgb(&mut rgb).changed() {
+                *color = egui::Color32::from_rgb(
+                    (rgb[0] * 255.0) as u8,
+                    (rgb[1] * 255.0) as u8,
+                    (rgb[2] * 255.0) as u8,
+                );
             }
-        }
+            ui.monospace(format!("#{:02X}{:02X}{:02X}", color.r(), color.g(), color.b()));
+        });
     });
+}
 
-    ui.add_space(4.0);
-    row(ui, &rust_i18n::t!("settings_theme_preset"), |ui| {
+fn preset_combo_row(ui: &mut egui::Ui, layout: SettingsFormLayout, label: &str, profile: &mut Profile) {
+    layout.form_row(ui, label, |ui, _| {
         let presets = TerminalTheme::presets();
         egui::ComboBox::from_id_salt("theme_preset_combo")
             .selected_text("—")
+            .width(SettingsFormLayout::control_width(ui))
             .show_ui(ui, |ui| {
                 for (name, preset_fn) in &presets {
                     if ui.selectable_label(false, *name).clicked() {
@@ -386,15 +531,121 @@ fn profile_detail_editor(
     });
 }
 
-fn profile_selector(ui: &mut egui::Ui, settings: &mut AppSettings, state: &mut TabState) {
+// ═══════════════════════════════════════════════════════════════════════════════
+//  TAB CONTENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+fn general_tab(ui: &mut egui::Ui, settings: &mut AppSettings) {
+    section_form(ui, &rust_i18n::t!("settings_tab_general"), "", "general_main", |ui, layout| {
+        layout.form_row(ui, &rust_i18n::t!("language"), |ui, layout| {
+            egui::ComboBox::from_id_salt("language_selector")
+                .selected_text(settings.language.label())
+                .width(SettingsFormLayout::control_width(ui))
+                .show_ui(ui, |ui| {
+                    for lang in Language::ALL {
+                        let label = lang.label();
+                        if ui.selectable_label(settings.language == lang, label).clicked() {
+                            settings.language = lang;
+                            lang.apply();
+                        }
+                    }
+                });
+        });
+
+        use crate::i18n::UiTheme;
+        combo_row(
+            ui,
+            layout,
+            &rust_i18n::t!("ui_theme"),
+            &mut settings.ui_theme,
+            &UiTheme::ALL,
+            |theme| theme.label(),
+            "ui_theme_selector",
+        );
+    });
+
+    section_env_card(
+        ui,
+        &rust_i18n::t!("settings_section_ssh_env"),
+        &rust_i18n::t!("settings_section_ssh_env_desc"),
+        "ssh_env",
+        &mut settings.ssh_env_vars,
+    );
+}
+
+fn profiles_tab(ui: &mut egui::Ui, settings: &mut AppSettings, state: &mut TabState) {
+    section_card(
+        ui,
+        &rust_i18n::t!("settings_section_profiles"),
+        &rust_i18n::t!("settings_section_profiles_desc"),
+        |ui, layout| profile_selector(ui, layout, settings, state),
+    );
+
     if settings.profiles.is_empty() {
-        ui.label(egui::RichText::new(rust_i18n::t!("settings_no_profiles")).color(egui::Color32::GRAY));
-        if ui.button(rust_i18n::t!("settings_create_profile")).clicked() {
-            let mut p = Profile::default();
-            p.name = format!("Profile {}", settings.profiles.len() + 1);
-            settings.profiles.push(p);
-            state.selected_profile = settings.profiles.len() - 1;
+        return;
+    }
+
+    let profile_idx = state.selected_profile;
+    let is_default = settings.default_profile_name == settings.profiles[profile_idx].name;
+
+    if let Some(profile) = settings.profiles.get_mut(profile_idx) {
+        let title = format!("{}: {}", rust_i18n::t!("settings_profile_detail"), profile.name);
+        section_form(ui, &title, "", "profile_detail", |ui, layout| {
+            profile_detail_rows(ui, layout, profile, is_default);
+        });
+    }
+}
+
+fn profile_detail_rows(
+    ui: &mut egui::Ui,
+    layout: SettingsFormLayout,
+    profile: &mut Profile,
+    is_default: bool,
+) {
+    text_row(ui, layout, &rust_i18n::t!("settings_profile_name"), &mut profile.name, "");
+    text_row(ui, layout, &rust_i18n::t!("settings_profile_description"), &mut profile.description, "");
+    preset_combo_row(ui, layout, &rust_i18n::t!("settings_theme_preset"), profile);
+
+    if is_default {
+        layout.form_row(ui, "", |ui, _| {
+            ui.label(
+                egui::RichText::new(rust_i18n::t!("settings_current_default"))
+                    .size(FORM_GROUP_SIZE)
+                    .color(ui.visuals().weak_text_color()),
+            );
+        });
+    }
+
+    layout.form_actions_row(ui, |ui| {
+        if ui.button(rust_i18n::t!("settings_duplicate_profile")).clicked() {
+            let new_name = format!("{} (Copy)", profile.name);
+            let _copy = profile.duplicate(&new_name);
         }
+        if ui.button(rust_i18n::t!("settings_export_profile")).clicked() {
+            if let Ok(json) = profile.export_json() {
+                ui.ctx().copy_text(json);
+            }
+        }
+    });
+}
+
+fn profile_selector(
+    ui: &mut egui::Ui,
+    layout: SettingsFormLayout,
+    settings: &mut AppSettings,
+    state: &mut TabState,
+) {
+    fill_page_width(ui);
+    if settings.profiles.is_empty() {
+        ui.label(egui::RichText::new(rust_i18n::t!("settings_no_profiles")).size(12.0).color(egui::Color32::GRAY));
+        layout.form_actions_row(ui, |ui| {
+            if ui.button(rust_i18n::t!("settings_create_profile")).clicked() {
+                let mut p = Profile::default();
+                p.name = format!("Profile {}", settings.profiles.len() + 1);
+                settings.profiles.push(p);
+                state.selected_profile = settings.profiles.len() - 1;
+            }
+        });
         return;
     }
 
@@ -412,8 +663,9 @@ fn profile_selector(ui: &mut egui::Ui, settings: &mut AppSettings, state: &mut T
 
         egui::Frame::new()
             .fill(bg)
+            .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
             .corner_radius(6)
-            .inner_margin(egui::Margin::symmetric(8, 4))
+            .inner_margin(egui::Margin::symmetric(8, 6))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let label = if is_default {
@@ -421,7 +673,10 @@ fn profile_selector(ui: &mut egui::Ui, settings: &mut AppSettings, state: &mut T
                     } else {
                         name.clone()
                     };
-                    if ui.selectable_label(is_selected, egui::RichText::new(&label).size(13.0)).clicked() {
+                    if ui
+                        .selectable_label(is_selected, SettingsFormLayout::form_label(&label))
+                        .clicked()
+                    {
                         state.selected_profile = i;
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -430,13 +685,15 @@ fn profile_selector(ui: &mut egui::Ui, settings: &mut AppSettings, state: &mut T
                                 to_delete = Some(i);
                             }
                         }
-                        if !is_default && ui.small_button("★").on_hover_text(rust_i18n::t!("settings_set_default")).clicked() {
+                        if !is_default
+                            && ui.small_button("★").on_hover_text(rust_i18n::t!("settings_set_default")).clicked()
+                        {
                             settings.default_profile_name = name.clone();
                         }
                     });
                 });
             });
-        ui.add_space(2.0);
+        ui.add_space(4.0);
     }
 
     if let Some(idx) = to_delete {
@@ -446,234 +703,290 @@ fn profile_selector(ui: &mut egui::Ui, settings: &mut AppSettings, state: &mut T
         }
     }
 
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        let mut new_name = String::new();
-        ui.add(
-            egui::TextEdit::singleline(&mut new_name)
-                .hint_text(rust_i18n::t!("settings_new_profile_hint"))
-                .desired_width(140.0),
-        );
-        if ui.button(rust_i18n::t!("settings_create_profile")).clicked() && !new_name.is_empty() {
-            let mut p = Profile::default();
-            p.name = new_name;
-            settings.profiles.push(p);
-            state.selected_profile = settings.profiles.len() - 1;
-        }
+    ui.add_space(4.0);
+    let new_name_id = ui.id().with("new_profile_name");
+    let mut new_name: String = ui.data_mut(|d| {
+        d.get_temp_mut_or_insert_with(new_name_id, String::new).clone()
+    });
+    layout.with_form_grid(ui, "profile_create", |ui, layout| {
+        layout.form_row(ui, &rust_i18n::t!("settings_create_profile"), |ui, _| {
+            ui.horizontal(|ui| {
+                let field_w = (SettingsFormLayout::control_width(ui) - 88.0).max(80.0);
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut new_name)
+                        .hint_text(rust_i18n::t!("settings_new_profile_hint"))
+                        .desired_width(field_w),
+                );
+                if resp.changed() {
+                    ui.data_mut(|d| *d.get_temp_mut_or_insert_with(new_name_id, String::new) = new_name.clone());
+                }
+                if ui.button(rust_i18n::t!("settings_create_profile")).clicked() && !new_name.is_empty() {
+                    let mut p = Profile::default();
+                    p.name = new_name.clone();
+                    settings.profiles.push(p);
+                    state.selected_profile = settings.profiles.len() - 1;
+                    new_name.clear();
+                    ui.data_mut(|d| d.get_temp_mut_or_insert_with(new_name_id, String::new).clear());
+                }
+            });
+        });
     });
 }
-
-// ─── Appearance Tab ───────────────────────────────────────────────────────────
 
 fn appearance_tab(ui: &mut egui::Ui, settings: &mut AppSettings, profile_idx: usize) {
     let Some(profile) = settings.profiles.get_mut(profile_idx) else {
         ui.colored_label(egui::Color32::YELLOW, rust_i18n::t!("settings_profile_not_found"));
         return;
     };
-    section(ui, &rust_i18n::t!("settings_section_appearance"), &rust_i18n::t!("settings_section_appearance_desc"), |ui| {
-        slider_row(ui, &rust_i18n::t!("settings_font_size"), &mut profile.font_size, 8.0..=32.0);
-        slider_row(ui, &rust_i18n::t!("settings_line_spacing"), &mut profile.line_spacing, 0.5..=2.0);
-        slider_row(ui, &rust_i18n::t!("settings_cell_width"), &mut profile.cell_width_scale, 0.5..=1.5);
+    section_form(
+        ui,
+        &rust_i18n::t!("settings_section_appearance"),
+        &rust_i18n::t!("settings_section_appearance_desc"),
+        "appearance",
+        |ui, layout| {
+            slider_row(ui, layout, &rust_i18n::t!("settings_font_size"), &mut profile.font_size, 8.0..=32.0);
+            slider_row(ui, layout, &rust_i18n::t!("settings_line_spacing"), &mut profile.line_spacing, 0.5..=2.0);
+            slider_row(ui, layout, &rust_i18n::t!("settings_cell_width"), &mut profile.cell_width_scale, 0.5..=1.5);
 
-        ui.add_space(6.0);
-        ui.separator();
-        ui.add_space(4.0);
+            layout.form_divider(ui);
 
-        radio_group(ui, &rust_i18n::t!("settings_cursor_style"), &mut profile.cursor_style, &CursorStyle::ALL, |cs| cs.label());
+            radio_group(
+                ui,
+                layout,
+                &rust_i18n::t!("settings_cursor_style"),
+                &mut profile.cursor_style,
+                &CursorStyle::ALL,
+                |cs| cs.label(),
+            );
+            toggle_row(ui, layout, &rust_i18n::t!("settings_bold_is_bright"), &mut profile.bold_is_bright);
 
-        toggle_row(ui, &rust_i18n::t!("settings_bold_is_bright"), &mut profile.bold_is_bright);
+            layout.form_divider(ui);
 
-        ui.add_space(6.0);
-        ui.separator();
-        ui.add_space(4.0);
+            slider_row_usize(
+                ui,
+                layout,
+                &rust_i18n::t!("settings_scrollback_lines"),
+                &mut profile.scrollback_lines,
+                100..=100_000,
+                true,
+            );
 
-        slider_row_usize(ui, &rust_i18n::t!("settings_scrollback_lines"), &mut profile.scrollback_lines, 100..=100_000, true);
+            layout.form_divider(ui);
 
-        ui.add_space(6.0);
-        ui.separator();
-        ui.add_space(4.0);
-
-        radio_group(ui, &rust_i18n::t!("settings_default_keyboard"), &mut profile.keyboard_mode, &[KeyboardMode::Full, KeyboardMode::Special], |km| {
-            match km {
-                KeyboardMode::Full => rust_i18n::t!("settings_keyboard_full").into_owned(),
-                KeyboardMode::Special => rust_i18n::t!("settings_keyboard_special").into_owned(),
-            }
-        });
-    });
+            radio_group(
+                ui,
+                layout,
+                &rust_i18n::t!("settings_default_keyboard"),
+                &mut profile.keyboard_mode,
+                &[KeyboardMode::Full, KeyboardMode::Special],
+                |km| match km {
+                    KeyboardMode::Full => rust_i18n::t!("settings_keyboard_full").into_owned(),
+                    KeyboardMode::Special => rust_i18n::t!("settings_keyboard_special").into_owned(),
+                },
+            );
+        },
+    );
 }
-
-// ─── Theme Tab ────────────────────────────────────────────────────────────────
 
 fn theme_tab(ui: &mut egui::Ui, settings: &mut AppSettings, profile_idx: usize) {
     let Some(profile) = settings.profiles.get_mut(profile_idx) else {
         ui.colored_label(egui::Color32::YELLOW, rust_i18n::t!("settings_profile_not_found"));
         return;
     };
-    section(ui, &rust_i18n::t!("settings_theme_preset"), &rust_i18n::t!("settings_theme_preset_desc"), |ui| {
-        ui.horizontal(|ui| {
-            let presets = TerminalTheme::presets();
-            for (name, preset_fn) in &presets {
-                if ui.button(*name).clicked() {
-                    profile.theme = preset_fn();
-                }
-            }
-        });
-    });
-    section(ui, &rust_i18n::t!("settings_theme_colors"), "", |ui| {
-        theme_colors_editor(ui, profile);
+    section_form(
+        ui,
+        &rust_i18n::t!("settings_theme_preset"),
+        &rust_i18n::t!("settings_theme_preset_desc"),
+        "theme_preset",
+        |ui, layout| {
+            preset_combo_row(ui, layout, &rust_i18n::t!("settings_theme_preset"), profile);
+        },
+    );
+    section_form(ui, &rust_i18n::t!("settings_theme_colors"), "", "theme_colors", |ui, layout| {
+        theme_color_rows(ui, layout, profile);
     });
 }
 
-fn theme_colors_editor(ui: &mut egui::Ui, profile: &mut Profile) {
-    ui.label(egui::RichText::new(rust_i18n::t!("theme_basic")).size(12.0).weak());
-    color_row(ui, &rust_i18n::t!("theme_bg"), &mut profile.theme.bg);
-    color_row(ui, &rust_i18n::t!("theme_fg"), &mut profile.theme.fg);
-    color_row(ui, &rust_i18n::t!("theme_cursor"), &mut profile.theme.cursor);
-    color_row(ui, &rust_i18n::t!("theme_selection"), &mut profile.theme.selection);
-    ui.add_space(6.0);
-    ui.label(egui::RichText::new(rust_i18n::t!("theme_standard")).size(12.0).weak());
-    color_row(ui, &rust_i18n::t!("theme_black"), &mut profile.theme.black);
-    color_row(ui, &rust_i18n::t!("theme_red"), &mut profile.theme.red);
-    color_row(ui, &rust_i18n::t!("theme_green"), &mut profile.theme.green);
-    color_row(ui, &rust_i18n::t!("theme_yellow"), &mut profile.theme.yellow);
-    color_row(ui, &rust_i18n::t!("theme_blue"), &mut profile.theme.blue);
-    color_row(ui, &rust_i18n::t!("theme_magenta"), &mut profile.theme.magenta);
-    color_row(ui, &rust_i18n::t!("theme_cyan"), &mut profile.theme.cyan);
-    color_row(ui, &rust_i18n::t!("theme_white"), &mut profile.theme.white);
-    ui.add_space(6.0);
-    ui.label(egui::RichText::new(rust_i18n::t!("theme_bright")).size(12.0).weak());
-    color_row(ui, &rust_i18n::t!("theme_bright_black"), &mut profile.theme.bright_black);
-    color_row(ui, &rust_i18n::t!("theme_bright_red"), &mut profile.theme.bright_red);
-    color_row(ui, &rust_i18n::t!("theme_bright_green"), &mut profile.theme.bright_green);
-    color_row(ui, &rust_i18n::t!("theme_bright_yellow"), &mut profile.theme.bright_yellow);
-    color_row(ui, &rust_i18n::t!("theme_bright_blue"), &mut profile.theme.bright_blue);
-    color_row(ui, &rust_i18n::t!("theme_bright_magenta"), &mut profile.theme.bright_magenta);
-    color_row(ui, &rust_i18n::t!("theme_bright_cyan"), &mut profile.theme.bright_cyan);
-    color_row(ui, &rust_i18n::t!("theme_bright_white"), &mut profile.theme.bright_white);
-}
+fn theme_color_rows(ui: &mut egui::Ui, layout: SettingsFormLayout, profile: &mut Profile) {
+    layout.form_group_heading(ui, &rust_i18n::t!("theme_basic"));
+    color_row(ui, layout, &rust_i18n::t!("theme_bg"), &mut profile.theme.bg);
+    color_row(ui, layout, &rust_i18n::t!("theme_fg"), &mut profile.theme.fg);
+    color_row(ui, layout, &rust_i18n::t!("theme_cursor"), &mut profile.theme.cursor);
+    color_row(ui, layout, &rust_i18n::t!("theme_selection"), &mut profile.theme.selection);
 
-// ─── Behavior Tab ─────────────────────────────────────────────────────────────
+    layout.form_divider(ui);
+
+    layout.form_group_heading(ui, &rust_i18n::t!("theme_standard"));
+    color_row(ui, layout, &rust_i18n::t!("theme_black"), &mut profile.theme.black);
+    color_row(ui, layout, &rust_i18n::t!("theme_red"), &mut profile.theme.red);
+    color_row(ui, layout, &rust_i18n::t!("theme_green"), &mut profile.theme.green);
+    color_row(ui, layout, &rust_i18n::t!("theme_yellow"), &mut profile.theme.yellow);
+    color_row(ui, layout, &rust_i18n::t!("theme_blue"), &mut profile.theme.blue);
+    color_row(ui, layout, &rust_i18n::t!("theme_magenta"), &mut profile.theme.magenta);
+    color_row(ui, layout, &rust_i18n::t!("theme_cyan"), &mut profile.theme.cyan);
+    color_row(ui, layout, &rust_i18n::t!("theme_white"), &mut profile.theme.white);
+
+    layout.form_divider(ui);
+
+    layout.form_group_heading(ui, &rust_i18n::t!("theme_bright"));
+    color_row(ui, layout, &rust_i18n::t!("theme_bright_black"), &mut profile.theme.bright_black);
+    color_row(ui, layout, &rust_i18n::t!("theme_bright_red"), &mut profile.theme.bright_red);
+    color_row(ui, layout, &rust_i18n::t!("theme_bright_green"), &mut profile.theme.bright_green);
+    color_row(ui, layout, &rust_i18n::t!("theme_bright_yellow"), &mut profile.theme.bright_yellow);
+    color_row(ui, layout, &rust_i18n::t!("theme_bright_blue"), &mut profile.theme.bright_blue);
+    color_row(ui, layout, &rust_i18n::t!("theme_bright_magenta"), &mut profile.theme.bright_magenta);
+    color_row(ui, layout, &rust_i18n::t!("theme_bright_cyan"), &mut profile.theme.bright_cyan);
+    color_row(ui, layout, &rust_i18n::t!("theme_bright_white"), &mut profile.theme.bright_white);
+}
 
 fn behavior_tab(ui: &mut egui::Ui, settings: &mut AppSettings, profile_idx: usize) {
     let Some(profile) = settings.profiles.get_mut(profile_idx) else {
         ui.colored_label(egui::Color32::YELLOW, rust_i18n::t!("settings_profile_not_found"));
         return;
     };
-    section(ui, &rust_i18n::t!("settings_terminal_behavior"), &rust_i18n::t!("settings_terminal_behavior_desc"), |ui| {
-        combo_row(ui, &rust_i18n::t!("settings_terminal_type"), &mut profile.terminal_type, &TerminalType::ALL, |tt| tt.label().to_string(), "terminal_type_combo");
+    section_form(
+        ui,
+        &rust_i18n::t!("settings_terminal_behavior"),
+        &rust_i18n::t!("settings_terminal_behavior_desc"),
+        "behavior",
+        |ui, layout| {
+            combo_row(
+                ui,
+                layout,
+                &rust_i18n::t!("settings_terminal_type"),
+                &mut profile.terminal_type,
+                &TerminalType::ALL,
+                |tt| tt.label().to_string(),
+                "terminal_type_combo",
+            );
 
-        ui.add_space(4.0);
-        ui.separator();
-        ui.add_space(4.0);
+            layout.form_divider(ui);
 
-        radio_group(ui, &rust_i18n::t!("settings_bell"), &mut profile.bell, &BellStyle::ALL, |bs| bs.label().to_string());
+            radio_group(
+                ui,
+                layout,
+                &rust_i18n::t!("settings_bell"),
+                &mut profile.bell,
+                &BellStyle::ALL,
+                |bs| bs.label().to_string(),
+            );
 
-        ui.add_space(4.0);
-        ui.separator();
-        ui.add_space(4.0);
+            layout.form_divider(ui);
 
-        toggle_row(ui, &rust_i18n::t!("settings_bracketed_paste"), &mut profile.enable_bracketed_paste);
-        toggle_row(ui, &rust_i18n::t!("settings_sgr_mouse"), &mut profile.enable_sgr_mouse);
-        toggle_row(ui, &rust_i18n::t!("settings_auto_wrap"), &mut profile.auto_wrap);
+            toggle_row(ui, layout, &rust_i18n::t!("settings_bracketed_paste"), &mut profile.enable_bracketed_paste);
+            toggle_row(ui, layout, &rust_i18n::t!("settings_sgr_mouse"), &mut profile.enable_sgr_mouse);
+            toggle_row(ui, layout, &rust_i18n::t!("settings_auto_wrap"), &mut profile.auto_wrap);
 
-        ui.add_space(4.0);
-        ui.separator();
-        ui.add_space(4.0);
+            layout.form_divider(ui);
 
-        text_row(ui, &rust_i18n::t!("settings_word_separators"), &mut profile.word_separators, "", 200.0);
-    });
+            text_row(
+                ui,
+                layout,
+                &rust_i18n::t!("settings_word_separators"),
+                &mut profile.word_separators,
+                "",
+            );
+        },
+    );
 }
-
-// ─── Advanced Tab ─────────────────────────────────────────────────────────────
 
 fn advanced_tab(ui: &mut egui::Ui, settings: &mut AppSettings, profile_idx: usize) {
     let Some(profile) = settings.profiles.get_mut(profile_idx) else {
         ui.colored_label(egui::Color32::YELLOW, rust_i18n::t!("settings_profile_not_found"));
         return;
     };
-    section(ui, &rust_i18n::t!("settings_env_vars"), &rust_i18n::t!("settings_env_vars_desc"), |ui| {
-        env_var_editor(ui, &mut profile.env_vars);
-    });
+    section_env_card(
+        ui,
+        &rust_i18n::t!("settings_env_vars"),
+        &rust_i18n::t!("settings_env_vars_desc"),
+        "profile_env",
+        &mut profile.env_vars,
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  SHARED EDITORS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ─── SSH env vars editor (global) ─────────────────────────────────────────────
+/// Simple KEY = VALUE rows (fixed field widths, stays inside the card).
+fn env_var_editor(
+    ui: &mut egui::Ui,
+    scope_id: egui::Id,
+    vars: &mut std::collections::HashMap<String, String>,
+) {
+    const VALUE_WIDTH_MAX: f32 = 140.0;
+    const NEW_KEY_WIDTH_MAX: f32 = 88.0;
+    const NEW_VAL_WIDTH_MAX: f32 = 110.0;
 
-fn ssh_env_editor(ui: &mut egui::Ui, settings: &mut AppSettings) {
-    env_var_editor(ui, &mut settings.ssh_env_vars);
-}
-
-// ─── Generic env var editor ───────────────────────────────────────────────────
-
-fn env_var_editor(ui: &mut egui::Ui, vars: &mut std::collections::HashMap<String, String>) {
     let mut to_remove: Option<String> = None;
-    let mut new_key = String::new();
-    let mut new_val = String::new();
+    let new_key_id = scope_id.with("new_key");
+    let new_val_id = scope_id.with("new_val");
+    let mut new_key: String = ui.data_mut(|d| d.get_temp_mut_or_insert_with(new_key_id, String::new).clone());
+    let mut new_val: String = ui.data_mut(|d| d.get_temp_mut_or_insert_with(new_val_id, String::new).clone());
+
     let mut keys: Vec<String> = vars.keys().cloned().collect();
     keys.sort();
 
     if keys.is_empty() {
-        ui.label(egui::RichText::new(rust_i18n::t!("settings_no_variables")).size(12.0).color(egui::Color32::GRAY));
+        ui.label(
+            egui::RichText::new(rust_i18n::t!("settings_no_variables"))
+                .size(FORM_GROUP_SIZE)
+                .color(egui::Color32::GRAY),
+        );
     }
+
     for key in &keys {
+        let key = key.clone();
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(key).monospace());
+            ui.label(egui::RichText::new(&key).monospace());
             ui.label("=");
-            if let Some(val) = vars.get(key) {
+            if let Some(val) = vars.get(&key) {
                 let mut v = val.clone();
-                ui.add(egui::TextEdit::singleline(&mut v).desired_width(120.0));
-                vars.insert(key.clone(), v);
+                let w = ui.available_width().max(48.0).min(VALUE_WIDTH_MAX);
+                let resp = ui.add(egui::TextEdit::singleline(&mut v).desired_width(w));
+                if resp.changed() {
+                    vars.insert(key.clone(), v);
+                }
             }
-            if ui.small_button("\u{2715}").clicked() { to_remove = Some(key.clone()); }
+            if ui.small_button("\u{2715}").on_hover_text(rust_i18n::t!("delete")).clicked() {
+                to_remove = Some(key);
+            }
         });
+        ui.add_space(4.0);
     }
-    if let Some(key) = to_remove { vars.remove(&key); }
+
+    if let Some(key) = to_remove {
+        vars.remove(&key);
+    }
+
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        ui.add(egui::TextEdit::singleline(&mut new_key).hint_text("KEY").desired_width(80.0));
+        let total = ui.available_width().max(120.0);
+        let key_w = (total * 0.34).clamp(56.0, NEW_KEY_WIDTH_MAX);
+        let val_w = (total - key_w - 58.0).max(48.0).min(NEW_VAL_WIDTH_MAX);
+        let key_resp = ui.add(
+            egui::TextEdit::singleline(&mut new_key)
+                .hint_text("KEY")
+                .desired_width(key_w),
+        );
+        if key_resp.changed() {
+            ui.data_mut(|d| *d.get_temp_mut_or_insert_with(new_key_id, String::new) = new_key.clone());
+        }
         ui.label("=");
-        ui.add(egui::TextEdit::singleline(&mut new_val).hint_text("value").desired_width(100.0));
+        let val_resp = ui.add(
+            egui::TextEdit::singleline(&mut new_val)
+                .hint_text("value")
+                .desired_width(val_w),
+        );
+        if val_resp.changed() {
+            ui.data_mut(|d| *d.get_temp_mut_or_insert_with(new_val_id, String::new) = new_val.clone());
+        }
         if ui.button(rust_i18n::t!("add")).clicked() && !new_key.is_empty() {
             vars.insert(new_key.clone(), new_val.clone());
+            ui.data_mut(|d| {
+                d.get_temp_mut_or_insert_with(new_key_id, String::new).clear();
+                d.get_temp_mut_or_insert_with(new_val_id, String::new).clear();
+            });
         }
-    });
-}
-
-// ─── Language selector ────────────────────────────────────────────────────────
-
-fn language_selector(ui: &mut egui::Ui, settings: &mut AppSettings) {
-    row(ui, &rust_i18n::t!("language"), |ui| {
-        egui::ComboBox::from_id_salt("language_selector")
-            .selected_text(settings.language.label())
-            .show_ui(ui, |ui| {
-                for lang in Language::ALL {
-                    let label = lang.label();
-                    if ui.selectable_label(settings.language == lang, label).clicked() {
-                        settings.language = lang;
-                        lang.apply();
-                    }
-                }
-            });
-    });
-}
-
-// ─── UI theme selector ────────────────────────────────────────────────────────
-
-fn ui_theme_selector(ui: &mut egui::Ui, settings: &mut AppSettings) {
-    use crate::i18n::UiTheme;
-    row(ui, &rust_i18n::t!("ui_theme"), |ui| {
-        egui::ComboBox::from_id_salt("ui_theme_selector")
-            .selected_text(settings.ui_theme.label())
-            .show_ui(ui, |ui| {
-                for theme in UiTheme::ALL {
-                    let label = theme.label();
-                    if ui.selectable_label(settings.ui_theme == theme, label).clicked() {
-                        settings.ui_theme = theme;
-                    }
-                }
-            });
     });
 }
