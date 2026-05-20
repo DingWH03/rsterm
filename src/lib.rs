@@ -5,12 +5,16 @@
     windows_subsystem = "windows"
 )]
 
+// Load all locale files from the `locales` directory at compile time.
+rust_i18n::i18n!("locales");
+
 pub mod app;
 pub mod config;
 pub mod connection;
 pub mod fs;
 pub mod session;
 pub mod fonts;
+pub mod i18n;
 pub mod platform;
 pub mod settings;
 pub mod storage;
@@ -42,7 +46,7 @@ pub fn run_desktop() {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1024.0, 768.0])
-            .with_title("rsTerm - Multi Terminal Emulator"),
+            .with_title(rust_i18n::t!("app_title")),
         centered: true,
         ..Default::default()
     };

@@ -122,9 +122,9 @@ impl NewConnectionDialog {
         let mut close = false;
 
         let title = if self.edit_id.is_some() {
-            "编辑连接"
+            rust_i18n::t!("dialog_edit_connection")
         } else {
-            "新建连接"
+            rust_i18n::t!("dialog_new_connection")
         };
         egui::Window::new(title)
             .collapsible(false)
@@ -132,13 +132,13 @@ impl NewConnectionDialog {
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("Name:");
+                    ui.label(rust_i18n::t!("dialog_name"));
                     ui.text_edit_singleline(&mut self.name);
                 });
 
                 let editing = self.edit_id.is_some();
                 ui.horizontal(|ui| {
-                    ui.label("Type:");
+                    ui.label(rust_i18n::t!("dialog_type"));
                     for ct in Self::available_types(&caps) {
                         let selected = self.conn_type == ct;
                         let mut text = egui::RichText::new(ct.label());
@@ -166,29 +166,29 @@ impl NewConnectionDialog {
                 match self.conn_type {
                     ConnectionType::Local => {
                         ui.horizontal(|ui| {
-                            ui.label("Shell (optional):");
+                            ui.label(rust_i18n::t!("dialog_shell"));
                             ui.text_edit_singleline(&mut self.shell);
                         });
                         ui.horizontal(|ui| {
-                            ui.label("Working directory:");
+                            ui.label(rust_i18n::t!("dialog_working_dir"));
                             ui.text_edit_singleline(&mut self.working_dir);
                         });
                     }
                     ConnectionType::Ssh => {
                         ui.horizontal(|ui| {
-                            ui.label("Host:");
+                            ui.label(rust_i18n::t!("dialog_host"));
                             ui.text_edit_singleline(&mut self.ssh_host);
                         });
                         ui.horizontal(|ui| {
-                            ui.label("Port:");
+                            ui.label(rust_i18n::t!("dialog_port"));
                             ui.text_edit_singleline(&mut self.ssh_port);
                         });
                         ui.horizontal(|ui| {
-                            ui.label("User:");
+                            ui.label(rust_i18n::t!("dialog_user"));
                             ui.text_edit_singleline(&mut self.ssh_user);
                         });
                         ui.horizontal(|ui| {
-                            ui.label("Password:");
+                            ui.label(rust_i18n::t!("dialog_password"));
                             ui.add(
                                 egui::TextEdit::singleline(&mut self.ssh_password)
                                     .password(true),
@@ -196,7 +196,7 @@ impl NewConnectionDialog {
                         });
                         ui.label(
                             egui::RichText::new(
-                                "留空则使用 ~/.ssh 密钥，或环境变量 SSH_PASSWORD",
+                                rust_i18n::t!("dialog_ssh_password_hint"),
                             )
                             .small()
                             .weak(),
@@ -204,13 +204,13 @@ impl NewConnectionDialog {
                     }
                     ConnectionType::Serial => {
                         ui.horizontal(|ui| {
-                            if ui.button("刷新设备").clicked() {
+                            if ui.button(rust_i18n::t!("dialog_refresh_devices")).clicked() {
                                 self.refresh_serial_devices();
                             }
                         });
                         if self.serial_devices.is_empty() {
                             ui.horizontal(|ui| {
-                                ui.label("Device:");
+                                ui.label(rust_i18n::t!("dialog_device"));
                                 ui.text_edit_singleline(&mut self.serial_port);
                             });
                         } else {
@@ -220,7 +220,7 @@ impl NewConnectionDialog {
                                 .find(|(path, _)| path == &self.serial_port)
                                 .map(|(_, label)| label.as_str())
                                 .unwrap_or(self.serial_port.as_str());
-                            egui::ComboBox::from_label("Device")
+                            egui::ComboBox::from_label(rust_i18n::t!("dialog_device"))
                                 .selected_text(selected_text)
                                 .show_ui(ui, |ui| {
                                     for (path, label) in &self.serial_devices {
@@ -233,16 +233,16 @@ impl NewConnectionDialog {
                                 });
                         }
                         ui.horizontal(|ui| {
-                            ui.label("Baud rate:");
+                            ui.label(rust_i18n::t!("dialog_baud_rate"));
                             ui.text_edit_singleline(&mut self.serial_baud);
                         });
                     }
                     ConnectionType::Ble => {
                         ui.horizontal(|ui| {
                             let scan_label = if self.ble_scanning {
-                                "扫描中…"
+                                rust_i18n::t!("scanning")
                             } else {
-                                "扫描设备"
+                                rust_i18n::t!("dialog_scan_devices")
                             };
                             if ui
                                 .add_enabled(!self.ble_scanning, egui::Button::new(scan_label))
@@ -253,11 +253,11 @@ impl NewConnectionDialog {
                         });
                         if self.ble_devices.is_empty() && !self.ble_scanning {
                             ui.label(
-                                egui::RichText::new("点击「扫描设备」查找附近 BLE 设备")
+                                egui::RichText::new(rust_i18n::t!("dialog_ble_scan_hint"))
                                     .weak(),
                             );
                             ui.horizontal(|ui| {
-                                ui.label("设备名:");
+                                ui.label(rust_i18n::t!("dialog_device_name"));
                                 ui.text_edit_singleline(&mut self.ble_device);
                             });
                         } else if !self.ble_devices.is_empty() {
@@ -266,7 +266,7 @@ impl NewConnectionDialog {
                             } else {
                                 self.ble_device.as_str()
                             };
-                            egui::ComboBox::from_label("Device")
+                            egui::ComboBox::from_label(rust_i18n::t!("dialog_device"))
                                 .selected_text(selected)
                                 .show_ui(ui, |ui| {
                                     for name in &self.ble_devices {
@@ -284,7 +284,7 @@ impl NewConnectionDialog {
                 ui.add_space(16.0);
 
                 ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(rust_i18n::t!("cancel")).clicked() {
                         close = true;
                     }
 
@@ -297,9 +297,9 @@ impl NewConnectionDialog {
                         };
 
                     let save_label = if self.edit_id.is_some() {
-                        "保存"
+                        rust_i18n::t!("save")
                     } else {
-                        "创建"
+                        rust_i18n::t!("create")
                     };
                     if ui
                         .add_enabled(can_create, egui::Button::new(save_label))
@@ -517,7 +517,7 @@ impl LocalTerminalSettingsDialog {
         let mut result = None;
         let mut close = false;
 
-        egui::Window::new("Local Terminal Settings")
+        egui::Window::new(rust_i18n::t!("dialog_local_terminal_settings"))
             .collapsible(false)
             .resizable(true)
             .default_width(420.0)
@@ -527,13 +527,14 @@ impl LocalTerminalSettingsDialog {
                     .filter(|c| c.conn_type == ConnectionType::Local)
                     .collect();
 
-                ui.label("Saved profile (optional):");
+                ui.label(rust_i18n::t!("dialog_saved_profile"));
+                let custom_label = rust_i18n::t!("dialog_custom_profile");
                 let selected_label = self
                     .profile_id
                     .as_ref()
                     .and_then(|id| local_profiles.iter().find(|c| c.id == *id))
                     .map(|c| c.name.as_str())
-                    .unwrap_or("(custom — not linked to a saved profile)");
+                    .unwrap_or(&custom_label);
                 egui::ComboBox::from_id_salt("local_term_profile")
                     .selected_text(selected_label)
                     .show_ui(ui, |ui| {
@@ -555,29 +556,29 @@ impl LocalTerminalSettingsDialog {
 
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    ui.label("Shell:");
+                    ui.label(rust_i18n::t!("dialog_shell"));
                     ui.text_edit_singleline(&mut self.shell);
                 });
                 ui.horizontal(|ui| {
-                    ui.label("Working directory:");
+                    ui.label(rust_i18n::t!("dialog_working_dir"));
                     ui.text_edit_singleline(&mut self.working_dir);
                 });
                 let hint = if self.session_id.is_some() {
-                    "Saved settings apply after reconnecting the active session."
+                    rust_i18n::t!("dialog_reconnect_hint")
                 } else {
-                    "These settings are used the next time you open a local terminal."
+                    rust_i18n::t!("dialog_next_time_hint")
                 };
                 ui.label(egui::RichText::new(hint).small().weak());
 
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(rust_i18n::t!("cancel")).clicked() {
                         close = true;
                     }
                     let apply_label = if self.session_id.is_some() {
-                        "Apply && Reconnect"
+                        rust_i18n::t!("dialog_apply_reconnect")
                     } else {
-                        "Apply"
+                        rust_i18n::t!("dialog_apply")
                     };
                     if ui.button(apply_label).clicked() {
                         let session_id = self.session_id.clone();

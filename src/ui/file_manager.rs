@@ -568,19 +568,19 @@ fn paint_bottom_action_bar(
                     ops.bulk_cut = Some(selected.iter().copied().collect());
                     ops.dismiss_multiselect = true;
                 }
-                if ui.button("Delete").clicked() {
+                if ui.button(rust_i18n::t!("delete")).clicked() {
                     ops.bulk_delete = Some(selected.iter().copied().collect());
                     ops.dismiss_multiselect = true;
                 }
             });
-            if ui.button("Cancel").clicked() {
+            if ui.button(rust_i18n::t!("cancel")).clicked() {
                 ops.dismiss_multiselect = true;
             }
         } else if has_clipboard {
             if ui.button("Paste").clicked() {
                 ops.paste = true;
             }
-            if ui.button("Cancel").clicked() {
+            if ui.button(rust_i18n::t!("cancel")).clicked() {
                 *clipboard = None;
             }
         }
@@ -1068,7 +1068,7 @@ fn show_info_dialog(ctx: &egui::Context, session: &mut FileManagerSession) {
                     }
                 });
             ui.add_space(12.0);
-            if ui.button("Close").clicked() {
+            if ui.button(rust_i18n::t!("close")).clicked() {
                 close = true;
             }
             if ui.input(|i| i.key_pressed(Key::Escape)) {
@@ -1102,7 +1102,7 @@ fn show_rename_dialog(ctx: &egui::Context, session: &mut FileManagerSession) {
             name_edit.request_focus();
             ui.add_space(12.0);
             ui.horizontal(|ui| {
-                if ui.button("Cancel").clicked() {
+                if ui.button(rust_i18n::t!("cancel")).clicked() {
                     close = true;
                 }
                 if ui.button("Confirm").clicked() {
@@ -1258,7 +1258,7 @@ fn row_context_menu_local(
             }
             ui.close();
         }
-        if ui.button("Delete").clicked() {
+        if ui.button(rust_i18n::t!("delete")).clicked() {
             ops.bulk_delete = Some(indices_for_context_action(&pane.selected, idx));
             if in_multiselect {
                 ops.dismiss_multiselect = true;
@@ -1307,7 +1307,7 @@ fn row_context_menu_remote(
             }
             ui.close();
         }
-        if ui.button("Delete").clicked() {
+        if ui.button(rust_i18n::t!("delete")).clicked() {
             ops.bulk_delete = Some(indices_for_context_action(&remote.selected, idx));
             if in_multiselect {
                 ops.dismiss_multiselect = true;

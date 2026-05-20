@@ -245,10 +245,10 @@ pub fn connection_view(
         if let Some(msg) = session.disconnect_message.clone() {
             let mut close = false;
             let lost = matches!(session.handle.state, ConnectionState::Lost(_));
-            let title = if lost {
-                "Disconnected"
+            let title: String = if lost {
+                "Disconnected".to_string()
             } else {
-                "Connection failed"
+                rust_i18n::t!("connection_failed").into_owned()
             };
             egui::Frame::new()
                 .fill(egui::Color32::from_rgba_unmultiplied(20, 20, 20, 240))
@@ -265,7 +265,7 @@ pub fn connection_view(
                         ui.add_space(8.0);
                         ui.label(egui::RichText::new(msg).size(14.0));
                         ui.add_space(16.0);
-                        if ui.button("Close").clicked() {
+                        if ui.button(rust_i18n::t!("close")).clicked() {
                             close = true;
                         }
                     });

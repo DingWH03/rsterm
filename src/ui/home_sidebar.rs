@@ -31,7 +31,7 @@ pub fn paint_home_sidebar(
 
     let mut nav_action = HomeSidebarAction::None;
     if ui
-        .selectable_label(on_home, egui::RichText::new("\u{2302}  Home").size(14.0))
+        .selectable_label(on_home, egui::RichText::new(format!("\u{2302}  {}", rust_i18n::t!("sidebar_home"))).size(14.0))
         .clicked()
     {
         nav_action = HomeSidebarAction::Home;
@@ -39,7 +39,7 @@ pub fn paint_home_sidebar(
     if ui
         .selectable_label(
             on_settings,
-            egui::RichText::new("\u{2699}  Settings").size(14.0),
+            egui::RichText::new(format!("\u{2699}  {}", rust_i18n::t!("settings"))).size(14.0),
         )
         .clicked()
     {

@@ -37,11 +37,11 @@ impl Default for CursorStyle {
 impl CursorStyle {
     pub const ALL: [Self; 3] = [Self::Bar, Self::Block, Self::Underline];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::Bar => "Bar (竖线)",
-            Self::Block => "Block (块状)",
-            Self::Underline => "Underline (下划线)",
+            Self::Bar => rust_i18n::t!("cursor_bar").into_owned(),
+            Self::Block => rust_i18n::t!("cursor_block").into_owned(),
+            Self::Underline => rust_i18n::t!("cursor_underline").into_owned(),
         }
     }
 }

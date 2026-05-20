@@ -39,7 +39,7 @@ pub fn sidebar_sessions_panel(
         new_window_session: None,
     };
 
-    ui.label(egui::RichText::new("Sessions").size(12.0).weak());
+    ui.label(egui::RichText::new(rust_i18n::t!("sidebar_sessions")).size(12.0).weak());
     ui.add_space(2.0);
 
     egui::ScrollArea::vertical()
@@ -48,7 +48,7 @@ pub fn sidebar_sessions_panel(
         .show(ui, |ui| {
             if sessions.is_empty() {
                 ui.label(
-                    egui::RichText::new("No open terminals")
+                    egui::RichText::new(rust_i18n::t!("sidebar_no_sessions"))
                         .size(12.0)
                         .color(egui::Color32::GRAY),
                 );
@@ -99,7 +99,7 @@ fn paint_session_row(
             ui.set_width(actions_w);
             if ui
                 .small_button("\u{2715}")
-                .on_hover_text("关闭")
+                .on_hover_text(rust_i18n::t!("close"))
                 .clicked()
             {
                 action.close_session = Some(session.id().to_string());
@@ -112,7 +112,7 @@ fn paint_session_row(
                         )
                         .small(),
                     )
-                    .on_hover_text("新窗口")
+                    .on_hover_text(rust_i18n::t!("new_window"))
                     .clicked()
             {
                 action.new_window_session = Some(session.id().to_string());

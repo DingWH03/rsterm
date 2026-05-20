@@ -32,11 +32,11 @@ pub fn home_screen(
             *local_clicked = true;
         }
         local_body.context_menu(|ui| {
-            if ui.button("Connect").clicked() {
+            if ui.button(rust_i18n::t!("connect")).clicked() {
                 *local_clicked = true;
                 ui.close();
             }
-            if ui.button("File Manager").clicked() {
+            if ui.button(rust_i18n::t!("home_file_manager")).clicked() {
                 card_menu.local_fm = true;
                 ui.close();
             }
@@ -48,13 +48,13 @@ pub fn home_screen(
         ui.add_space(20.0);
         ui.vertical_centered(|ui| {
             ui.label(
-                egui::RichText::new("No saved connections yet")
+                egui::RichText::new(rust_i18n::t!("home_no_connections"))
                     .size(14.0)
                     .color(egui::Color32::GRAY),
             );
         });
     } else {
-        ui.label(egui::RichText::new("Saved Connections").weak());
+        ui.label(egui::RichText::new(rust_i18n::t!("home_saved_connections")).weak());
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -76,21 +76,21 @@ pub fn home_screen(
                     }
 
                     card.context_menu(|ui| {
-                        if ui.button("Connect").clicked() {
+                        if ui.button(rust_i18n::t!("connect")).clicked() {
                             *connect_clicked = Some(conn.id.clone());
                             ui.close();
                         }
-                        if ui.button("Edit").clicked() {
+                        if ui.button(rust_i18n::t!("edit")).clicked() {
                             *edit_clicked = Some(conn.id.clone());
                             ui.close();
                         }
                         if conn.conn_type == ConnectionType::Ssh
-                            && ui.button("Remote Files").clicked()
+                            && ui.button(rust_i18n::t!("home_remote_files")).clicked()
                         {
                             *sftp_clicked = Some(conn.id.clone());
                             ui.close();
                         }
-                        if ui.button("Delete").clicked() {
+                        if ui.button(rust_i18n::t!("delete")).clicked() {
                             to_delete = Some(i);
                             ui.close();
                         }
@@ -296,7 +296,7 @@ fn render_local_terminal_card(
         );
         let name = ui.fonts_mut(|f| {
             f.layout(
-                "Local Terminal".to_string(),
+                rust_i18n::t!("home_local_terminal").to_string(),
                 egui::FontId::proportional(16.0),
                 egui::Color32::WHITE,
                 f32::INFINITY,

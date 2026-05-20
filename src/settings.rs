@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::config::{CursorStyle, TerminalTheme};
+use crate::i18n::Language;
 use crate::ui::keyboard::KeyboardMode;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +42,9 @@ pub struct AppSettings {
     /// Saved local connection profile used for quick「Open Local Terminal」.
     #[serde(default)]
     pub default_local_connection_id: Option<String>,
+    /// UI language preference.
+    #[serde(default)]
+    pub language: Language,
 }
 
 impl Default for AppSettings {
@@ -54,6 +58,7 @@ impl Default for AppSettings {
                 ("LANG".to_string(), "en_US.UTF-8".to_string()),
             ]),
             default_local_connection_id: None,
+            language: Language::default(),
         }
     }
 }

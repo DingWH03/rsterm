@@ -53,12 +53,12 @@ async fn scan_ble_async() -> Result<Vec<String>, String> {
 
 fn no_adapter_error() -> String {
     if cfg!(windows) {
-        "未找到蓝牙适配器。请在 Windows 设置中打开蓝牙。".to_string()
+        rust_i18n::t!("ble_no_adapter_windows").to_string()
     } else if cfg!(target_os = "android") {
-        "未找到蓝牙适配器。请打开蓝牙并授予应用蓝牙/定位权限。".to_string()
+        rust_i18n::t!("ble_no_adapter_android").to_string()
     } else if cfg!(target_os = "macos") {
-        "未找到蓝牙适配器。请在系统设置中打开蓝牙。".to_string()
+        rust_i18n::t!("ble_no_adapter_macos").to_string()
     } else {
-        "未找到蓝牙适配器。".to_string()
+        rust_i18n::t!("ble_no_adapter").to_string()
     }
 }

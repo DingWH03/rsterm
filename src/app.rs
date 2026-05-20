@@ -51,6 +51,8 @@ pub struct RstermApp {
 impl Default for RstermApp {
     fn default() -> Self {
         let settings = crate::settings::load_settings();
+        // Apply the saved language preference on startup.
+        settings.language.apply();
         let live_font_size = settings.font_size();
         let kbd_mode = settings.default_profile().keyboard_mode;
         let saved = storage::load_connections();
@@ -79,7 +81,7 @@ fn show_connection_notice(ctx: &egui::Context, notice: &mut Option<String>) {
         return;
     };
     let mut dismiss = false;
-    egui::Window::new("Connection failed")
+    egui::Window::new(rust_i18n::t!("connection_failed"))
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
@@ -87,7 +89,7 @@ fn show_connection_notice(ctx: &egui::Context, notice: &mut Option<String>) {
             ui.set_max_width(420.0);
             ui.label(egui::RichText::new(&msg).size(14.0));
             ui.add_space(12.0);
-            if ui.button("OK").clicked() {
+            if ui.button(rust_i18n::t!("ok")).clicked() {
                 dismiss = true;
             }
         });

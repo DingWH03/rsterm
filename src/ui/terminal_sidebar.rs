@@ -33,7 +33,7 @@ pub fn terminal_sidebar(
     ui.separator();
 
     if ui
-        .selectable_label(false, egui::RichText::new("\u{2302}  Home").size(14.0))
+        .selectable_label(false, egui::RichText::new(format!("\u{2302}  {}", rust_i18n::t!("sidebar_home"))).size(14.0))
         .clicked()
     {
         action.go_home = true;
@@ -41,7 +41,7 @@ pub fn terminal_sidebar(
     if ui
         .selectable_label(
             on_settings,
-            egui::RichText::new("\u{2699}  Settings").size(14.0),
+            egui::RichText::new(format!("\u{2699}  {}", rust_i18n::t!("settings"))).size(14.0),
         )
         .clicked()
     {

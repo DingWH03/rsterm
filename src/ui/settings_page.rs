@@ -1,3 +1,4 @@
+use crate::i18n::Language;
 use crate::settings::{AppSettings, Profile};
 use crate::ui::keyboard::KeyboardMode;
 
@@ -5,7 +6,7 @@ use crate::ui::keyboard::KeyboardMode;
 pub fn settings_page(ui: &mut egui::Ui, settings: &mut AppSettings) -> bool {
     let mut close = false;
     ui.horizontal(|ui| {
-        if ui.button("← Back").clicked() {
+        if ui.button(rust_i18n::t!("back")).clicked() {
             close = true;
         }
     });
@@ -18,11 +19,11 @@ pub fn settings_page(ui: &mut egui::Ui, settings: &mut AppSettings) -> bool {
 pub fn settings_side_panel(ui: &mut egui::Ui, settings: &mut AppSettings) -> bool {
     let mut close = false;
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Settings").size(16.0).strong());
+        ui.label(egui::RichText::new(rust_i18n::t!("settings")).size(16.0).strong());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
                 .add(egui::Button::new("\u{2715}").small())
-                .on_hover_text("Close")
+                .on_hover_text(rust_i18n::t!("close"))
                 .clicked()
             {
                 close = true;
@@ -30,7 +31,7 @@ pub fn settings_side_panel(ui: &mut egui::Ui, settings: &mut AppSettings) -> boo
         });
     });
     ui.label(
-        egui::RichText::new("终端在后台继续运行")
+        egui::RichText::new(rust_i18n::t!("settings_terminal_running_hint"))
             .size(11.0)
             .color(egui::Color32::GRAY),
     );
@@ -65,13 +66,23 @@ fn settings_scroll_body(ui: &mut egui::Ui, settings: &mut AppSettings, layout: S
 }
 
 pub fn settings_page_body(ui: &mut egui::Ui, settings: &mut AppSettings) {
+    // ---- Language selector (top-level) ----
     settings_section(
         ui,
-        "配置文件",
-        "管理终端主题与键盘等个性化方案（后续支持导入/导出）",
+        &rust_i18n::t!("language"),
+        "",
+        |ui| {
+            language_selector(ui, settings);
+        },
+    );
+
+    settings_section(
+        ui,
+        &rust_i18n::t!("settings_section_profiles"),
+        &rust_i18n::t!("settings_section_profiles_desc"),
         |ui| {
             ui.horizontal(|ui| {
-                ui.label("当前默认：");
+                ui.label(rust_i18n::t!("settings_current_default"));
                 ui.label(
                     egui::RichText::new(&settings.default_profile_name)
                         .strong()
@@ -83,17 +94,17 @@ pub fn settings_page_body(ui: &mut egui::Ui, settings: &mut AppSettings) {
         },
     );
 
-    settings_section(ui, "外观", "字体、滚动缓冲与默认键盘", |ui| {
+    settings_section(ui, &rust_i18n::t!("settings_section_appearance"), &rust_i18n::t!("settings_section_appearance_desc"), |ui| {
         let profile = settings
             .profiles
             .iter_mut()
             .find(|p| p.name == settings.default_profile_name);
 
         if let Some(profile) = profile {
-            labeled_row(ui, "字体大小", |ui| {
+            labeled_row(ui, &rust_i18n::t!("settings_font_size"), |ui| {
                 ui.add(egui::Slider::new(&mut profile.font_size, 8.0..=32.0).show_value(true));
             });
-            labeled_row(ui, "回滚行数", |ui| {
+            labeled_row(ui, &rust_i18n::t!("settings_scrollback_lines"), |ui| {
                 ui.add(
                     egui::Slider::new(&mut profile.scrollback_lines, 100..=100_000)
                         .logarithmic(true)
@@ -101,29 +112,29 @@ pub fn settings_page_body(ui: &mut egui::Ui, settings: &mut AppSettings) {
                 );
             });
             ui.add_space(4.0);
-            ui.label(egui::RichText::new("默认键盘").size(12.0).weak());
+            ui.label(egui::RichText::new(rust_i18n::t!("settings_default_keyboard")).size(12.0).weak());
             ui.horizontal(|ui| {
-                ui.radio_value(&mut profile.keyboard_mode, KeyboardMode::Full, "全键盘");
+                ui.radio_value(&mut profile.keyboard_mode, KeyboardMode::Full, rust_i18n::t!("settings_keyboard_full"));
                 ui.radio_value(
                     &mut profile.keyboard_mode,
                     KeyboardMode::Special,
-                    "功能键",
+                    rust_i18n::t!("settings_keyboard_special"),
                 );
             });
 
             ui.add_space(8.0);
-            egui::CollapsingHeader::new("主题颜色")
+            egui::CollapsingHeader::new(rust_i18n::t!("settings_theme_colors"))
                 .id_salt("theme_colors")
                 .default_open(false)
                 .show(ui, |ui| {
                     theme_colors_editor(ui, profile);
                 });
         } else {
-            ui.colored_label(egui::Color32::YELLOW, "未找到默认配置文件");
+            ui.colored_label(egui::Color32::YELLOW, rust_i18n::t!("settings_profile_not_found"));
         }
     });
 
-    settings_section(ui, "SSH 环境变量", "新建 SSH 连接时注入的默认环境", |ui| {
+    settings_section(ui, &rust_i18n::t!("settings_section_ssh_env"), &rust_i18n::t!("settings_section_ssh_env_desc"), |ui| {
         ssh_env_editor(ui, settings);
     });
 }
@@ -165,10 +176,10 @@ fn profile_list_editor(ui: &mut egui::Ui, settings: &mut AppSettings) {
                 ui.label(egui::RichText::new(format!("● {name}")).strong());
             } else {
                 ui.label(name.as_str());
-                if ui.small_button("设为默认").clicked() {
+                if ui.small_button(rust_i18n::t!("settings_set_default")).clicked() {
                     settings.default_profile_name = name.clone();
                 }
-                if ui.small_button("删除").clicked() {
+                if ui.small_button(rust_i18n::t!("delete")).clicked() {
                     settings.profiles.retain(|p| p.name != *name);
                 }
             }
@@ -180,10 +191,10 @@ fn profile_list_editor(ui: &mut egui::Ui, settings: &mut AppSettings) {
         let mut new_name = String::new();
         ui.add(
             egui::TextEdit::singleline(&mut new_name)
-                .hint_text("新配置名称…")
+                .hint_text(rust_i18n::t!("settings_new_profile_hint"))
                 .desired_width(140.0),
         );
-        if ui.button("新建配置").clicked() && !new_name.is_empty() {
+        if ui.button(rust_i18n::t!("settings_create_profile")).clicked() && !new_name.is_empty() {
             let mut p = Profile::default();
             p.name = new_name;
             settings.profiles.push(p);
@@ -192,31 +203,31 @@ fn profile_list_editor(ui: &mut egui::Ui, settings: &mut AppSettings) {
 }
 
 fn theme_colors_editor(ui: &mut egui::Ui, profile: &mut crate::settings::Profile) {
-    ui.label(egui::RichText::new("基础").size(12.0).weak());
-    color_edit(ui, "背景", &mut profile.theme.bg);
-    color_edit(ui, "前景", &mut profile.theme.fg);
-    color_edit(ui, "光标", &mut profile.theme.cursor);
-    color_edit(ui, "选中", &mut profile.theme.selection);
+    ui.label(egui::RichText::new(rust_i18n::t!("theme_basic")).size(12.0).weak());
+    color_edit(ui, &rust_i18n::t!("theme_bg"), &mut profile.theme.bg);
+    color_edit(ui, &rust_i18n::t!("theme_fg"), &mut profile.theme.fg);
+    color_edit(ui, &rust_i18n::t!("theme_cursor"), &mut profile.theme.cursor);
+    color_edit(ui, &rust_i18n::t!("theme_selection"), &mut profile.theme.selection);
     ui.add_space(6.0);
-    ui.label(egui::RichText::new("标准色").size(12.0).weak());
-    color_edit(ui, "黑", &mut profile.theme.black);
-    color_edit(ui, "红", &mut profile.theme.red);
-    color_edit(ui, "绿", &mut profile.theme.green);
-    color_edit(ui, "黄", &mut profile.theme.yellow);
-    color_edit(ui, "蓝", &mut profile.theme.blue);
-    color_edit(ui, "洋红", &mut profile.theme.magenta);
-    color_edit(ui, "青", &mut profile.theme.cyan);
-    color_edit(ui, "白", &mut profile.theme.white);
+    ui.label(egui::RichText::new(rust_i18n::t!("theme_standard")).size(12.0).weak());
+    color_edit(ui, &rust_i18n::t!("theme_black"), &mut profile.theme.black);
+    color_edit(ui, &rust_i18n::t!("theme_red"), &mut profile.theme.red);
+    color_edit(ui, &rust_i18n::t!("theme_green"), &mut profile.theme.green);
+    color_edit(ui, &rust_i18n::t!("theme_yellow"), &mut profile.theme.yellow);
+    color_edit(ui, &rust_i18n::t!("theme_blue"), &mut profile.theme.blue);
+    color_edit(ui, &rust_i18n::t!("theme_magenta"), &mut profile.theme.magenta);
+    color_edit(ui, &rust_i18n::t!("theme_cyan"), &mut profile.theme.cyan);
+    color_edit(ui, &rust_i18n::t!("theme_white"), &mut profile.theme.white);
     ui.add_space(6.0);
-    ui.label(egui::RichText::new("高亮").size(12.0).weak());
-    color_edit(ui, "亮黑", &mut profile.theme.bright_black);
-    color_edit(ui, "亮红", &mut profile.theme.bright_red);
-    color_edit(ui, "亮绿", &mut profile.theme.bright_green);
-    color_edit(ui, "亮黄", &mut profile.theme.bright_yellow);
-    color_edit(ui, "亮蓝", &mut profile.theme.bright_blue);
-    color_edit(ui, "亮洋红", &mut profile.theme.bright_magenta);
-    color_edit(ui, "亮青", &mut profile.theme.bright_cyan);
-    color_edit(ui, "亮白", &mut profile.theme.bright_white);
+    ui.label(egui::RichText::new(rust_i18n::t!("theme_bright")).size(12.0).weak());
+    color_edit(ui, &rust_i18n::t!("theme_bright_black"), &mut profile.theme.bright_black);
+    color_edit(ui, &rust_i18n::t!("theme_bright_red"), &mut profile.theme.bright_red);
+    color_edit(ui, &rust_i18n::t!("theme_bright_green"), &mut profile.theme.bright_green);
+    color_edit(ui, &rust_i18n::t!("theme_bright_yellow"), &mut profile.theme.bright_yellow);
+    color_edit(ui, &rust_i18n::t!("theme_bright_blue"), &mut profile.theme.bright_blue);
+    color_edit(ui, &rust_i18n::t!("theme_bright_magenta"), &mut profile.theme.bright_magenta);
+    color_edit(ui, &rust_i18n::t!("theme_bright_cyan"), &mut profile.theme.bright_cyan);
+    color_edit(ui, &rust_i18n::t!("theme_bright_white"), &mut profile.theme.bright_white);
 }
 
 fn ssh_env_editor(ui: &mut egui::Ui, settings: &mut AppSettings) {
@@ -229,7 +240,7 @@ fn ssh_env_editor(ui: &mut egui::Ui, settings: &mut AppSettings) {
 
     if keys.is_empty() {
         ui.label(
-            egui::RichText::new("暂无变量")
+            egui::RichText::new(rust_i18n::t!("settings_no_variables"))
                 .size(12.0)
                 .color(egui::Color32::GRAY),
         );
@@ -267,7 +278,7 @@ fn ssh_env_editor(ui: &mut egui::Ui, settings: &mut AppSettings) {
                 .hint_text("value")
                 .desired_width(100.0),
         );
-        if ui.button("添加").clicked() && !new_key.is_empty() {
+        if ui.button(rust_i18n::t!("add")).clicked() && !new_key.is_empty() {
             settings.ssh_env_vars.insert(new_key.clone(), new_val.clone());
         }
     });
@@ -289,5 +300,23 @@ fn color_edit(ui: &mut egui::Ui, label: &str, color: &mut egui::Color32) {
             );
         }
         ui.monospace(format!("#{:02X}{:02X}{:02X}", color.r(), color.g(), color.b()));
+    });
+}
+
+/// Language selector widget. Applies the language immediately when changed.
+fn language_selector(ui: &mut egui::Ui, settings: &mut AppSettings) {
+    ui.horizontal(|ui| {
+        ui.label(rust_i18n::t!("language"));
+        egui::ComboBox::from_id_salt("language_selector")
+            .selected_text(settings.language.label())
+            .show_ui(ui, |ui| {
+                for lang in Language::ALL {
+                    let label = lang.label();
+                    if ui.selectable_label(settings.language == lang, label).clicked() {
+                        settings.language = lang;
+                        lang.apply();
+                    }
+                }
+            });
     });
 }
