@@ -160,7 +160,11 @@ impl ConnectionHandle {
 
     pub fn resize(&self, rows: u16, cols: u16) {
         if let Some(tx) = &self.blocking_resize {
-            let _ = tx.send((rows, cols));
+            // blocking_resize is a rendezvous SyncSender.  If the writer thread has exited
+            // (e.g. reconnect), fall back to the best-effort sender.
+            if tx.send((rows, cols)).is_err() {
+                let _ = self.sender.send(ConnOut::Resize(rows, cols));
+            }
         } else {
             let _ = self.sender.send(ConnOut::Resize(rows, cols));
         }

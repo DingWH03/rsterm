@@ -457,27 +457,25 @@ impl Screen {
 
         let old_rows = self.rows;
         let old_cols = self.cols;
-        if self.in_alternate_screen() {
-            // Full-screen TUIs repaint after SIGWINCH; keeping old cells causes ghost rows (btop).
-            self.cells = vec![vec![Cell::default(); cols]; rows];
-            self.cursor_x = 0;
-            self.cursor_y = 0;
-            self.scroll_top = 0;
-            self.scroll_bottom = rows.saturating_sub(1);
-            self.origin_mode = false;
-        } else {
-            self.cells = Self::resize_grid(&self.cells, old_rows, old_cols, rows, cols);
-        }
+
+        self.cells = Self::resize_grid(&self.cells, old_rows, old_cols, rows, cols);
+
         if let Some(main) = self.saved_main.as_mut() {
             main.cells = Self::resize_grid(&main.cells, old_rows, old_cols, rows, cols);
         }
+
         self.rows = rows;
         self.cols = cols;
+
         self.cursor_y = self.cursor_y.min(rows.saturating_sub(1));
         self.cursor_x = self.cursor_x.min(cols.saturating_sub(1));
-        self.pending_wrap = false;
-        if !self.in_alternate_screen() {
-            self.scroll_bottom = rows.saturating_sub(1);
+
+        self.scroll_top = 0;
+        self.scroll_bottom = rows.saturating_sub(1);
+
+        if self.in_alternate_screen() {
+            self.origin_mode = false;
+        } else {
             self.scroll_top = self.scroll_top.min(self.scroll_bottom);
         }
 
@@ -486,7 +484,11 @@ impl Screen {
             tab_stops[t] = true;
         }
         self.tab_stops = tab_stops;
+
         self.scroll_scratch.clear();
+
+        // 如果你已经加了 delayed autowrap
+        self.pending_wrap = false;
     }
 
     fn clear_wide_trailer(&mut self, row: usize, col: usize) {

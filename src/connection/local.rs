@@ -34,9 +34,13 @@ fn apply_pty_resize(
     cols: u16,
     shell_pid: Option<u32>,
 ) {
-    if master.resize(pty_size(rows, cols)).is_ok() {
-        signal_winch_if_needed(master, shell_pid);
-    }
+    // Try TIOCSWINSZ first – the kernel will broadcast SIGWINCH to the foreground
+    // process group on success.  Always send our own SIGWINCH as well because:
+    //   - Some kernels/pty layers skip the automatic SIGWINCH when the size is the
+    //     same (harmless extra signal).
+    //   - portable-pty might fail TIOCSWINSZ (e.g. Windows ConPTY fallback).
+    let _ = master.resize(pty_size(rows, cols));
+    signal_winch_if_needed(master, shell_pid);
 }
 
 pub fn connect_local(
@@ -63,8 +67,6 @@ pub fn connect_local(
     // Login/interactive shell (Unix). Windows uses ConPTY + cmd/powershell without -l.
     #[cfg(unix)]
     cmd.arg("-l");
-    cmd.env("COLUMNS", cols.to_string());
-    cmd.env("LINES", rows.to_string());
 
     // Inherit system environment variables
     for (key, value) in std::env::vars() {
