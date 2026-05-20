@@ -676,3 +676,163 @@ mod tests {
         assert_eq!(row[2].fg, Color::Indexed(244));
     }
 }
+
+    #[test]
+    fn btop_like_status_bar_on_first_row() {
+        // Simulate btop's initialization sequence and UI drawing
+        let mut term = Terminal::new(24, 80);
+        
+        // Step 1: Enter alternate screen (btop uses CSI ?1049h)
+        term.write(b"\x1b[?1049h");
+        assert!(term.screen.in_alternate_screen(), "should be in alt screen");
+        
+        // Step 2: btop typical initialization
+        term.write(b"\x1b[22;0;0t");  // save window title (ignored)
+        term.write(b"\x1b[?1l");      // reset cursor keys
+        term.write(b"\x1b(B");        // set G0 to US ASCII
+        term.write(b"\x1b[m");        // reset attributes
+        term.write(b"\x1b[?7h");      // set auto-wrap
+        term.write(b"\x1b[?12l");     // reset blink cursor
+        term.write(b"\x1b[?25l");     // hide cursor
+        term.write(b"\x1b[?1000l");   // disable mouse
+        term.write(b"\x1b[?1002l");   // disable mouse drag
+        term.write(b"\x1b[?1006l");   // disable SGR mouse
+        
+        // Step 3: Clear screen and home cursor
+        term.write(b"\x1b[2J");       // clear screen
+        term.write(b"\x1b[H");        // home cursor
+        
+        // Step 4: Draw first row (status bar with box drawing and battery)
+        // btop typically draws with colors, but we test basic positioning
+        term.write(b"\x1b[1;1H");     // CUP to row 1, col 1
+        term.write(b"\x1b[44m");      // set blue background
+        term.write(b"\x1b[37m");      // set white foreground
+        term.write(b"\xe2\x94\x8c");  // ┌ (U+250C)
+        term.write(b"\xe2\x94\x80");  // ─ (U+2500)
+        term.write(b" BAT 100% ");
+        term.write(b"\xe2\x94\x80");  // ─
+        term.write(b"\xe2\x94\x90");  // ┐ (U+2510)
+        term.write(b"\x1b[m");        // reset
+        
+        // Step 5: Draw second row (CPU bar)
+        term.write(b"\x1b[2;1H");     // CUP to row 2, col 1
+        term.write(b"CPU \xe2\x96\x88\xe2\x96\x88\xe2\x96\x88 50%");  // CPU ███ 50%
+        
+        // Verify first row content
+        let row0: String = term.screen.cells[0].iter().map(|c| c.ch).collect();
+        let row0_trimmed = row0.trim_end().to_string();
+        assert!(
+            row0_trimmed.contains('\u{250c}'),
+            "row 0 should start with ┌, got row0={row0:?}"
+        );
+        assert!(
+            row0_trimmed.contains("BAT"),
+            "row 0 should contain BAT, got row0={row0:?}"
+        );
+        assert!(
+            row0_trimmed.contains('\u{2510}'),
+            "row 0 should end with ┐, got row0={row0:?}"
+        );
+        
+        // Verify second row content
+        let row1: String = term.screen.cells[1].iter().map(|c| c.ch).collect();
+        let row1_trimmed = row1.trim_end().to_string();
+        assert!(
+            row1_trimmed.contains("CPU"),
+            "row 1 should contain CPU, got row1={row1:?}"
+        );
+        assert!(
+            row1_trimmed.contains("50%"),
+            "row 1 should contain 50%, got row1={row1:?}"
+        );
+    }
+
+    #[test]
+    fn btop_first_row_survives_resize() {
+        // Simulate the exact flow: create terminal, resize, run btop-like output
+        let mut term = Terminal::new(24, 80);
+        
+        // Simulate first frame resize (24x80 -> 35x100)
+        term.resize(35, 100);
+        assert_eq!(term.screen.rows, 35);
+        assert_eq!(term.screen.cols, 100);
+        
+        // Now run btop
+        term.write(b"\x1b[?1049h");  // Enter alt screen
+        assert!(term.screen.in_alternate_screen());
+        assert_eq!(term.screen.rows, 35);
+        assert_eq!(term.screen.cols, 100);
+        
+        term.write(b"\x1b[?25l");    // Hide cursor
+        term.write(b"\x1b[0m");      // Reset
+        term.write(b"\x1b[38;2;200;200;200m");  // Light gray fg
+        term.write(b"\x1b[48;2;0;0;0m");        // Black bg
+        
+        // Draw top border row with ─ and corners
+        term.write(b"\x1b[1;1f");    // Position (1,1)
+        term.write(b"\xe2\x95\xad"); // ╭ (U+256D)
+        for _ in 0..30 {
+            term.write(b"\xe2\x94\x80"); // ─
+        }
+        term.write(b"\xe2\x94\xac"); // ┬
+        for _ in 0..60 {
+            term.write(b"\xe2\x94\x80"); // ─
+        }
+        term.write(b"\xe2\x95\xae"); // ╮ (U+256E)
+        
+        // Draw left box side and text on row 1
+        term.write(b"\x1b[2;1f");    // Position (2,1)
+        term.write(b"\xe2\x94\x82 \xe2\x96\x88\xe2\x96\x88 50% \xe2\x94\x82");
+        
+        // Now resize while in alt screen (simulating window resize)
+        term.screen.resize(40, 120);
+        
+        // After resize, check row 0 and 1
+        // Note: resize clears alt screen cells, so old content is gone
+        let row0: String = term.screen.cells[0].iter().map(|c| c.ch).collect();
+        assert!(
+            row0.trim().is_empty(),
+            "alt screen should be blank after resize, got row0={row0:?}"
+        );
+        
+        // Now simulate btop repaint after SIGWINCH
+        term.write(b"\x1b[1;1f");    // Re-draw at new size
+        term.write(b"\xe2\x95\xad BAT 100% \xe2\x95\xae");
+        term.write(b"\x1b[2;1f");
+        term.write(b"CPU \xe2\x96\x88\xe2\x96\x88 50%");
+        
+        let row0: String = term.screen.cells[0].iter().map(|c| c.ch).collect();
+        assert!(
+            row0.contains("BAT"),
+            "row 0 should contain BAT after repaint, got row0={row0:?}"
+        );
+        
+        let row1: String = term.screen.cells[1].iter().map(|c| c.ch).collect();
+        assert!(
+            row1.contains("CPU"),
+            "row 1 should contain CPU after repaint, got row1={row1:?}"
+        );
+    }
+
+    #[test]
+    fn btop_real_output_test() {
+        let data = include_bytes!("/tmp/btop_data.bin");
+        let mut term = Terminal::new(35, 100);
+        term.write(data);
+
+        assert!(term.screen.in_alternate_screen());
+
+        for row in 0..5 {
+            let cells: String = term.screen.cells[row].iter()
+                .map(|c| c.ch)
+                .collect();
+            eprintln!("ROW{row}: [{:?}]", cells.trim_end());
+        }
+
+        let row0: String = term.screen.cells[0].iter().map(|c| c.ch).collect();
+        assert!(!row0.trim().is_empty(), "row 0 empty");
+
+        let row1: String = term.screen.cells[1].iter().map(|c| c.ch).collect();
+        let row2: String = term.screen.cells[2].iter().map(|c| c.ch).collect();
+        assert_ne!(row1.trim_end(), row2.trim_end(), "rows 1,2 identical");
+    }

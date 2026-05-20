@@ -44,6 +44,7 @@ pub fn apply_resize(
     }
 }
 
+/// Drain pending PTY data after a grid-size change.
 pub fn drain_after_resize(
     session: &mut ActiveSession,
     action: &mut ConnectionViewAction,

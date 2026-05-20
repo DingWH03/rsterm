@@ -175,6 +175,7 @@ struct MainScreenState {
     saved_cursor_y: usize,
     scroll_top: usize,
     scroll_bottom: usize,
+    origin_mode: bool,
 }
 
 impl Screen {
@@ -351,8 +352,10 @@ impl Screen {
             self.scroll_top = 0;
             self.scroll_bottom = self.rows.saturating_sub(1);
             self.origin_mode = false;
+            self.current_attrs = self.default_attrs;
             self.pending_cr = false;
             self.suppress_extra_crlf_newline = false;
+            self.in_zsh_line_pad = false;
             return;
         }
         let snapshot = MainScreenState {
@@ -367,6 +370,7 @@ impl Screen {
             saved_cursor_y: self.saved_cursor_y,
             scroll_top: self.scroll_top,
             scroll_bottom: self.scroll_bottom,
+            origin_mode: self.origin_mode,
         };
         if save_cursor {
             self.saved_cursor_x = snapshot.cursor_x;
@@ -392,6 +396,7 @@ impl Screen {
         self.current_attrs = main.current_attrs;
         self.scroll_top = main.scroll_top;
         self.scroll_bottom = main.scroll_bottom;
+        self.origin_mode = main.origin_mode;
         if restore_cursor {
             self.cursor_x = main.cursor_x;
             self.cursor_y = main.cursor_y;
