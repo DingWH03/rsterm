@@ -5,14 +5,17 @@ use crate::connection::{ConnIn, ConnectionState};
 use crate::platform::{foreground_command, title_is_idle_host, truncate_label};
 use crate::storage::types::ConnectionType;
 use crate::terminal::parser::TermEvent;
-use crate::terminal::paint::paint_cursor;
-use crate::terminal::renderer::TerminalRenderer;
+use crate::fonts;
+use crate::terminal::cursor::paint_cursor;
+use crate::terminal::metrics::measure_cell;
+use crate::terminal::{DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS};
+use crate::ui::terminal_grid::{apply_resize, drain_after_resize};
 use crate::ui::clipboard::{read_text, write_text};
 use crate::ui::keyboard::VirtualKeyboard;
 use crate::ui::sidebar::{Sidebar, SidebarPage};
 use crate::ui::terminal_input::{
     allocate_terminal_surface, lock_terminal_focus, process_keyboard_input,
-    sync_android_soft_input, terminal_widget_id,
+    sync_android_soft_input, terminal_widget_id, TERMINAL_GRID_MARGIN,
 };
 use crate::ui::terminal_paint::{paint_row, RowGalleyCache};
 use crate::ui::terminal_mouse::{process_terminal_mouse, process_terminal_wheel};
@@ -51,10 +54,13 @@ pub struct ActiveSession {
     pub size_label_hide_at: Option<Instant>,
     /// True after the user has resized at least once (suppress overlay on connect).
     pub size_label_active: bool,
-    /// Frames left to aggressively drain PTY output after an alternate-screen resize.
-    pub alt_resize_drain_frames: u8,
+    /// Emulator grid rows/cols (matches PTY after first layout pass).
+    pub grid_rows: usize,
+    pub grid_cols: usize,
     /// Last cell reported for xterm mouse motion (dedupe).
     pub mouse_motion_last: Option<(usize, usize)>,
+    /// Last applied [`fonts::font_generation`] (clears glyph cache when fonts change).
+    pub font_generation: u32,
 }
 
 pub enum ConnectionViewAction {
@@ -90,11 +96,11 @@ impl ActiveSession {
 pub fn connection_view(
     ui: &mut egui::Ui,
     mut session: Option<&mut ActiveSession>,
-    renderer: &mut TerminalRenderer,
     keyboard: &mut VirtualKeyboard,
     theme: &TerminalTheme,
     cursor_style: CursorStyle,
     font_size: &mut f32,
+    cell_width_scale: f32,
     sidebar: &mut Sidebar,
 ) -> ConnectionViewAction {
     let ctx = ui.ctx().clone();
@@ -181,7 +187,6 @@ pub fn connection_view(
     ui.separator();
 
     // 2. Measure and resize terminal
-    renderer.font_size = *font_size;
     let available = ui.available_size();
     #[cfg(target_os = "android")]
     let ime_inset = if keyboard.android_ime_on {
@@ -192,14 +197,12 @@ pub fn connection_view(
     #[cfg(not(target_os = "android"))]
     let ime_inset = 0.0;
     let kb_total = keyboard.reserved_height(available.x);
-    let term_w = available.x;
-    let term_h = (available.y - kb_total - ime_inset).max(1.0);
+    let term_w = (available.x - 2.0 * TERMINAL_GRID_MARGIN).max(1.0);
+    let term_h = (available.y - kb_total - ime_inset - 2.0 * TERMINAL_GRID_MARGIN).max(1.0);
 
-    let (cell_w, cell_h) = TerminalRenderer::measure_cell(ui, *font_size);
+    let (cell_w, cell_h) = measure_cell(ui, *font_size, cell_width_scale);
     let desired_cols = (term_w / cell_w).floor().max(1.0) as usize;
     let desired_rows = (term_h / cell_h).floor().max(1.0) as usize;
-    let grid_cols = renderer.cols;
-    let grid_rows = renderer.rows;
     let mut resize_applied = false;
 
     if let Some(session) = session.as_mut() {
@@ -208,37 +211,25 @@ pub fn connection_view(
 
         let pty_rows = session.last_pty_rows as usize;
         let pty_cols = session.last_pty_cols as usize;
-        let size_changed = desired_rows != grid_rows
-            || desired_cols != grid_cols
+        let size_changed = desired_rows != session.grid_rows
+            || desired_cols != session.grid_cols
             || desired_rows != pty_rows
             || desired_cols != pty_cols
             || font_changed;
 
         if size_changed {
-            if in_alt {
-                // Emulator grid must match before ncurses paints the post-SIGWINCH refresh (~10kB).
-                sync_display_grid(session, renderer, desired_rows, desired_cols, *font_size);
-                sync_pty_size(session, desired_rows, desired_cols);
-                session.alt_resize_drain_frames = 120;
-            } else {
-                sync_pty_size(session, desired_rows, desired_cols);
-                sync_display_grid(session, renderer, desired_rows, desired_cols, *font_size);
-            }
-            drain_after_resize(session, &mut action, in_alt);
+            apply_resize(session, desired_rows, desired_cols, *font_size, in_alt);
+            drain_after_resize(session, &mut action, in_alt, drain_connection);
             ctx.request_repaint();
             resize_applied = true;
         }
     }
 
-    let grid_cols = renderer.cols;
-    let grid_rows = renderer.rows;
+    let grid_cols = session.as_ref().map(|s| s.grid_cols).unwrap_or(DEFAULT_GRID_COLS);
+    let grid_rows = session.as_ref().map(|s| s.grid_rows).unwrap_or(DEFAULT_GRID_ROWS);
 
-    // 3. Process connection data (keep draining after alt-screen resize; ncurses redraw is bursty)
+    // 3. Process connection data
     if let Some(session) = session.as_mut() {
-        if session.alt_resize_drain_frames > 0 {
-            session.alt_resize_drain_frames -= 1;
-            drain_after_resize(session, &mut action, true);
-        }
         while drain_connection(session, &mut action) {}
     }
 
@@ -436,9 +427,13 @@ pub fn connection_view(
             .unwrap_or(false);
 
         if let Some(session) = session.as_mut() {
-            let screen = &session.terminal.screen;
-            let font_id = egui::FontId::monospace(*font_size);
+            let font_gen = fonts::font_generation();
+            if session.font_generation != font_gen {
+                session.font_generation = font_gen;
+                session.row_galley_cache.clear();
+            }
 
+            let screen = &session.terminal.screen;
             let in_alt = screen.in_alternate_screen();
             if in_alt {
                 // vim/htop: do not scroll the shell scrollback behind the alternate buffer.
@@ -486,57 +481,46 @@ pub fn connection_view(
 
             let offset = session.scroll_offset;
 
+            let ppp = ui.ctx().pixels_per_point();
             let row_y = |row: usize| -> f32 {
                 let y = grid_rect.top() + row as f32 * cell_h;
-                #[cfg(target_os = "android")]
-                {
-                    y.round()
-                }
-                #[cfg(not(target_os = "android"))]
-                {
-                    y
-                }
+                (y * ppp).round() / ppp
             };
 
-            for row in 0..grid_rows {
-                if row < offset {
-                    let line_index = offset - 1 - row;
-                    if let Some(cells) = screen.scrollback_row(line_index) {
-                        let y = row_y(row);
-                        paint_row(
-                            &painter,
-                            ui,
-                            &mut session.row_galley_cache,
-                            &font_id,
-                            *font_size,
-                            theme,
-                            cells,
-                            grid_cols,
-                            grid_rect.left(),
-                            y,
-                            cell_w,
-                            cell_h,
-                        );
-                    }
-                } else {
-                    let screen_row = row - offset;
-                    if screen_row < screen.rows {
-                        let y = row_y(row);
-                        let cells = &screen.cells[screen_row];
-                        paint_row(
-                            &painter,
-                            ui,
-                            &mut session.row_galley_cache,
-                            &font_id,
-                            *font_size,
-                            theme,
-                            cells,
-                            grid_cols,
-                            grid_rect.left(),
-                            y,
-                            cell_w,
-                            cell_h,
-                        );
+            let mut paint_screen_row = |row: usize, cells: &[crate::terminal::screen::Cell]| {
+                paint_row(
+                    &painter,
+                    ui,
+                    &mut session.row_galley_cache,
+                    *font_size,
+                    theme,
+                    cells,
+                    grid_cols,
+                    grid_rect.left(),
+                    row_y(row),
+                    cell_w,
+                    cell_h,
+                    in_alt,
+                );
+            };
+
+            if in_alt {
+                let rows = grid_rows.min(screen.rows);
+                for row in 0..rows {
+                    paint_screen_row(row, &screen.cells[row]);
+                }
+            } else {
+                for row in 0..grid_rows {
+                    if row < offset {
+                        let line_index = offset - 1 - row;
+                        if let Some(cells) = screen.scrollback_row(line_index) {
+                            paint_screen_row(row, cells);
+                        }
+                    } else {
+                        let screen_row = row - offset;
+                        if screen_row < screen.rows {
+                            paint_screen_row(row, &screen.cells[screen_row]);
+                        }
                     }
                 }
             }
@@ -692,60 +676,6 @@ fn size_label_visible(
     }
 
     session.size_label_hide_at.is_some_and(|deadline| now < deadline)
-}
-
-/// Pull as much post-resize output as possible (htop sends a full-screen refresh via ncurses).
-fn drain_after_resize(
-    session: &mut ActiveSession,
-    action: &mut ConnectionViewAction,
-    in_alt: bool,
-) {
-    for _ in 0..256 {
-        if !drain_connection(session, action) {
-            break;
-        }
-    }
-    if in_alt {
-        session.handle.signal_winch();
-        for _ in 0..128 {
-            if !drain_connection(session, action) {
-                break;
-            }
-        }
-    }
-}
-
-/// Resize the on-screen cell grid to match the window (immediate, centered layout).
-fn sync_display_grid(
-    session: &mut ActiveSession,
-    renderer: &mut TerminalRenderer,
-    rows: usize,
-    cols: usize,
-    font_size: f32,
-) {
-    let rows = rows.max(1);
-    let cols = cols.max(1);
-    if renderer.rows == rows && renderer.cols == cols && session.layout_font_size == font_size {
-        return;
-    }
-    renderer.rows = rows;
-    renderer.cols = cols;
-    session.terminal.resize(rows, cols);
-    session.layout_font_size = font_size;
-    session.row_galley_cache.clear();
-    session.scroll_offset = 0;
-}
-
-/// Resize the PTY (SIGWINCH). Debounced for normal shell; immediate for alt-screen / shrink.
-fn sync_pty_size(session: &mut ActiveSession, rows: usize, cols: usize) {
-    let rows = rows.max(1) as u16;
-    let cols = cols.max(1) as u16;
-    if session.last_pty_rows == rows && session.last_pty_cols == cols {
-        return;
-    }
-    session.last_pty_rows = rows;
-    session.last_pty_cols = cols;
-    session.handle.resize(rows, cols);
 }
 
 /// Header control: clickable but not in keyboard focus navigation (Tab/arrows).

@@ -10,6 +10,9 @@ pub fn terminal_widget_id() -> Id {
     Id::new("rsterm_terminal_surface")
 }
 
+/// Inset between the panel edge and the cell grid (PTY size uses the inner area too).
+pub const TERMINAL_GRID_MARGIN: f32 = 4.0;
+
 /// Prevent arrow/tab/escape from moving egui focus away from the terminal.
 pub fn terminal_event_filter() -> EventFilter {
     EventFilter {
@@ -32,11 +35,17 @@ pub fn allocate_terminal_surface(
 ) -> (egui::Rect, egui::Rect, egui::Response) {
     let id = terminal_widget_id();
     let (_, panel_rect) = ui.allocate_space(available);
+    let inner = panel_rect.shrink2(egui::vec2(
+        TERMINAL_GRID_MARGIN,
+        TERMINAL_GRID_MARGIN,
+    ));
     let grid_size = Vec2::new(
-        grid_size.x.min(available.x),
-        grid_size.y.min(available.y),
+        grid_size.x.min(inner.width()),
+        grid_size.y.min(inner.height()),
     );
-    let grid_rect = egui::Rect::from_center_size(panel_rect.center(), grid_size);
+    // Top-align like a real terminal (centering left a gap and clipped the first row in TUIs).
+    let x = inner.left() + ((inner.width() - grid_size.x) * 0.5).max(0.0);
+    let grid_rect = egui::Rect::from_min_size(egui::pos2(x, inner.top()), grid_size);
     let response = ui.interact(grid_rect, id, sense);
     (panel_rect, grid_rect, response)
 }

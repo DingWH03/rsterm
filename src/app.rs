@@ -1,10 +1,11 @@
 use crate::connection::{ble, serial, ssh};
 #[cfg(not(target_os = "android"))]
 use crate::connection::local;
+use crate::fonts;
 use crate::settings::{AppSettings, save_settings};
 use crate::storage;
 use crate::storage::types::{ConnectionType, SavedConnection};
-use crate::terminal::renderer::TerminalRenderer;
+use crate::terminal::{DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS};
 use crate::terminal::Terminal;
 use crate::session::{FileManagerMode, FileManagerSession, WorkspaceSession};
 use crate::ui::connection_view::{
@@ -31,7 +32,6 @@ pub struct RstermApp {
     saved_connections: Vec<SavedConnection>,
     sessions: Vec<WorkspaceSession>,
     active_session_id: Option<String>,
-    terminal_renderer: TerminalRenderer,
     virtual_keyboard: VirtualKeyboard,
     new_conn_dialog: NewConnectionDialog,
     local_term_dialog: LocalTerminalSettingsDialog,
@@ -46,6 +46,10 @@ pub struct RstermApp {
     settings_open: bool,
     /// Immediate connect failure (serial open, SSH config, etc.) before a session is opened.
     connection_notice: Option<String>,
+    /// User confirmed exit while sessions were still open.
+    quit_after_close: bool,
+    /// Show「仍有会话，是否退出」dialog.
+    show_quit_dialog: bool,
 }
 
 impl Default for RstermApp {
@@ -61,7 +65,6 @@ impl Default for RstermApp {
             saved_connections: saved,
             sessions: Vec::new(),
             active_session_id: None,
-            terminal_renderer: TerminalRenderer::new(24, 80),
             virtual_keyboard: VirtualKeyboard::new(kbd_mode),
             new_conn_dialog: NewConnectionDialog::default(),
             local_term_dialog: LocalTerminalSettingsDialog::default(),
@@ -72,8 +75,49 @@ impl Default for RstermApp {
             workspace_settings: false,
             settings_open: false,
             connection_notice: None,
+            quit_after_close: false,
+            show_quit_dialog: false,
         }
     }
+}
+
+fn show_quit_confirm_dialog(
+    ctx: &egui::Context,
+    open: &mut bool,
+    session_count: usize,
+) -> bool {
+    if !*open {
+        return false;
+    }
+    let mut confirmed = false;
+    egui::Window::new(rust_i18n::t!("quit_with_sessions_title"))
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .show(ctx, |ui| {
+            ui.set_max_width(400.0);
+            ui.label(
+                egui::RichText::new(rust_i18n::t!("quit_with_sessions_body", count = session_count))
+                    .size(14.0),
+            );
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                if ui.button(rust_i18n::t!("cancel")).clicked() {
+                    *open = false;
+                }
+                if ui
+                    .button(
+                        egui::RichText::new(rust_i18n::t!("quit_with_sessions_confirm"))
+                            .strong(),
+                    )
+                    .clicked()
+                {
+                    confirmed = true;
+                    *open = false;
+                }
+            });
+        });
+    confirmed
 }
 
 fn show_connection_notice(ctx: &egui::Context, notice: &mut Option<String>) {
@@ -99,6 +143,17 @@ fn show_connection_notice(ctx: &egui::Context, notice: &mut Option<String>) {
 }
 
 impl RstermApp {
+    fn reload_terminal_fonts(&mut self, ctx: &egui::Context) {
+        fonts::apply_terminal_fonts(ctx, &self.settings.default_profile().terminal_font);
+        let font_gen = fonts::font_generation();
+        for session in &mut self.sessions {
+            if let WorkspaceSession::Terminal(term) = session {
+                term.row_galley_cache.clear();
+                term.font_generation = font_gen;
+            }
+        }
+    }
+
     fn push_session(&mut self, session: WorkspaceSession) {
         let id = session.id().to_string();
         self.active_session_id = Some(id);
@@ -231,7 +286,7 @@ impl RstermApp {
         scrollback_lines: usize,
     ) {
         let profile = self.settings.default_profile();
-        let mut terminal = Terminal::new(self.terminal_renderer.rows, self.terminal_renderer.cols);
+        let mut terminal = Terminal::new(DEFAULT_GRID_ROWS, DEFAULT_GRID_COLS);
         terminal.set_scrollback_limit(scrollback_lines);
         self.live_font_size = profile.font_size;
         self.virtual_keyboard = VirtualKeyboard::new(profile.keyboard_mode);
@@ -261,18 +316,28 @@ impl RstermApp {
             terminal_had_focus: false,
             row_galley_cache: Default::default(),
             layout_font_size: self.live_font_size,
-            last_pty_rows: self.terminal_renderer.rows as u16,
-            last_pty_cols: self.terminal_renderer.cols as u16,
-            size_label_dims: (
-                self.terminal_renderer.cols,
-                self.terminal_renderer.rows,
-            ),
+            grid_rows: DEFAULT_GRID_ROWS,
+            grid_cols: DEFAULT_GRID_COLS,
+            last_pty_rows: DEFAULT_GRID_ROWS as u16,
+            last_pty_cols: DEFAULT_GRID_COLS as u16,
+            size_label_dims: (DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS),
             size_label_hide_at: None,
             size_label_active: false,
-            alt_resize_drain_frames: 0,
             mouse_motion_last: None,
+            font_generation: crate::fonts::font_generation(),
             disconnect_message: None,
         }));
+    }
+
+    fn has_open_sessions(&self) -> bool {
+        !self.sessions.is_empty()
+    }
+
+    fn close_all_sessions(&mut self) {
+        let ids: Vec<String> = self.sessions.iter().map(|s| s.id().to_string()).collect();
+        for id in ids {
+            self.close_session(&id);
+        }
     }
 
     fn close_session(&mut self, id: &str) {
@@ -413,12 +478,29 @@ impl RstermApp {
 }
 
 impl eframe::App for RstermApp {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if ctx.input(|i| i.viewport().close_requested()) {
+            if self.quit_after_close || !self.has_open_sessions() {
+                return;
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.show_quit_dialog = true;
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx();
         // Apply UI theme on every frame (cheap — only changes if setting changed).
         self.settings.ui_theme.apply(ctx);
         self.sidebar.sync_width(ctx.content_rect().width());
         show_connection_notice(ctx, &mut self.connection_notice);
+
+        let session_count = self.sessions.len();
+        if show_quit_confirm_dialog(ctx, &mut self.show_quit_dialog, session_count) {
+            self.quit_after_close = true;
+            self.close_all_sessions();
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
 
         match self.page {
             Page::Home => {
@@ -486,6 +568,7 @@ impl eframe::App for RstermApp {
                             self.home_settings = false;
                             save_settings(&self.settings);
                             self.live_font_size = self.settings.font_size();
+                            self.reload_terminal_fonts(ui.ctx());
                         }
                     } else {
                         home_screen(
@@ -642,20 +725,22 @@ impl eframe::App for RstermApp {
                             self.workspace_settings = false;
                             save_settings(&self.settings);
                             self.live_font_size = self.settings.font_size();
+                            self.reload_terminal_fonts(ui.ctx());
                         }
                     } else if let Some(idx) = self.active_session_index() {
                         match &mut self.sessions[idx] {
                             WorkspaceSession::Terminal(term) => {
                                 let theme = self.settings.theme();
                                 let cursor_style = self.settings.cursor_style();
+                                let cell_width_scale = self.settings.default_profile().cell_width_scale;
                                 view_action = connection_view(
                                     ui,
                                     Some(term),
-                                    &mut self.terminal_renderer,
                                     &mut self.virtual_keyboard,
                                     theme,
                                     cursor_style,
                                     &mut self.live_font_size,
+                                    cell_width_scale,
                                     &mut self.sidebar,
                                 );
                             }

@@ -35,6 +35,9 @@ apply: "Apply"
 
 # ---- App Title ----
 app_title: "rsTerm - Multi Terminal Emulator"
+quit_with_sessions_title: "Quit rsTerm"
+quit_with_sessions_body: "%{count} session(s) are still open. Quit anyway?"
+quit_with_sessions_confirm: "Quit"
 
 # ---- Home ----
 home_no_connections: "No saved connections yet"
@@ -103,6 +106,9 @@ settings_ssh_env_desc: "Default environment injected for new SSH connections"
 
 # ---- Appearance Settings ----
 settings_font_size: "Font Size"
+settings_terminal_font: "Terminal Font"
+settings_terminal_font_auto: "Automatic"
+settings_terminal_font_loading: "Loading font list…"
 settings_line_spacing: "Line Spacing"
 settings_cell_width: "Cell Width Scale"
 settings_cursor_style: "Cursor Style"
@@ -117,6 +123,7 @@ settings_theme_colors_desc: "Fine-tune individual color values"
 theme_basic: "Basic"
 theme_bg: "Background"
 theme_fg: "Foreground"
+theme_cursor: "Cursor"
 theme_cursor_color: "Cursor"
 theme_selection: "Selection"
 theme_standard: "Standard"

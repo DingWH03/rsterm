@@ -14,6 +14,9 @@ pub struct Profile {
     pub description: String,
 
     // ---- Display ----
+    /// Absolute path to a monospace font file; empty = pick first suitable system mono.
+    #[serde(default)]
+    pub terminal_font: String,
     pub font_size: f32,
     #[serde(default = "default_line_spacing")]
     pub line_spacing: f32,
@@ -57,6 +60,7 @@ impl Default for Profile {
         Self {
             name: "Default".to_string(),
             description: String::new(),
+            terminal_font: String::new(),
             font_size: 14.0,
             line_spacing: 1.0,
             cell_width_scale: 1.0,

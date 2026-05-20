@@ -8,6 +8,7 @@ use egui::text::{LayoutJob, TextFormat};
 use egui::{Align, FontId, Galley, Painter, Stroke, Ui};
 
 use crate::config::TerminalTheme;
+use crate::fonts::terminal_font_id_for_char;
 use crate::terminal::screen::{cell_display_width, Cell, Color};
 
 /// Cache shaped single-glyph layouts keyed by character + visual attributes.
@@ -85,7 +86,6 @@ pub fn paint_row(
     painter: &Painter,
     ui: &Ui,
     cache: &mut RowGalleyCache,
-    font_id: &FontId,
     font_size: f32,
     theme: &TerminalTheme,
     cells: &[Cell],
@@ -94,6 +94,7 @@ pub fn paint_row(
     y: f32,
     cell_w: f32,
     cell_h: f32,
+    tui_surface: bool,
 ) {
     let col_count = cols.min(cells.len());
     if col_count == 0 || cell_w <= 0.0 || cell_h <= 0.0 {
@@ -155,13 +156,13 @@ pub fn paint_row(
             egui::vec2(cell_w * span as f32, cell_h),
         );
 
-        if cell.ch == ' ' && attrs.is_suggestion_style() {
+        if !tui_surface && cell.ch == ' ' && attrs.is_suggestion_style() {
             // zsh clears suggestion with dim/gray spaces — erase stale glyphs underneath.
             painter.rect_filled(cell_rect, egui::CornerRadius::ZERO, theme.bg);
         }
 
         if cell.ch != ' ' {
-            let galley = layout_glyph(ui, cache, font_id, font_size, theme, cell.ch, attrs);
+            let galley = layout_glyph(ui, cache, font_size, theme, cell.ch, attrs);
             let (fg, _) = resolve_colors(theme, attrs);
             paint_glyph_at(&painter, galley, cell_rect, fg);
         } else if attrs.underline {
@@ -201,6 +202,7 @@ fn hash_glyph(ch: char, attrs: RunAttrs, font_size: f32) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     font_size.to_bits().hash(&mut h);
     ch.hash(&mut h);
+    crate::fonts::needs_braille_font(ch).hash(&mut h);
     let mut n = h.finish();
     n = hash_color(n, attrs.fg);
     n = hash_color(n, attrs.bg);
@@ -260,7 +262,7 @@ fn text_format(font_id: FontId, fg: egui::Color32, bg: egui::Color32, attrs: Run
         italics: attrs.italic,
         underline: Stroke::NONE,
         strikethrough: if attrs.strikethrough { stroke } else { Stroke::NONE },
-        valign: Align::Center,
+        valign: Align::Min,
         ..Default::default()
     }
 }
@@ -271,26 +273,15 @@ fn paint_glyph_at(
     cell_rect: egui::Rect,
     fg: egui::Color32,
 ) {
-    let glyph_w = galley.size().x;
-    let glyph_h = galley.size().y;
-    let x_paint = cell_rect.left() + ((cell_rect.width() - glyph_w).max(0.0) * 0.5);
-    let y_paint = cell_rect.top() + ((cell_rect.height() - glyph_h).max(0.0) * 0.5);
-    #[cfg(target_os = "android")]
-    {
-        painter.galley(egui::pos2(x_paint, y_paint), galley, fg);
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        painter
-            .with_clip_rect(cell_rect)
-            .galley(egui::pos2(x_paint, y_paint), galley, fg);
-    }
+    let pos = egui::pos2(cell_rect.left(), cell_rect.top());
+    painter
+        .with_clip_rect(cell_rect)
+        .galley(pos, galley, fg);
 }
 
 fn layout_glyph(
     ui: &Ui,
     cache: &mut RowGalleyCache,
-    font_id: &FontId,
     font_size: f32,
     theme: &TerminalTheme,
     ch: char,
@@ -302,7 +293,8 @@ fn layout_glyph(
     }
 
     let (fg, bg) = resolve_colors(theme, attrs);
-    let format = text_format(font_id.clone(), fg, bg, attrs);
+    let font_id = terminal_font_id_for_char(ch, font_size);
+    let format = text_format(font_id, fg, bg, attrs);
     let mut utf8 = [0u8; 4];
     let ch_str = ch.encode_utf8(&mut utf8);
     let job = LayoutJob::single_section(ch_str.to_owned(), format);

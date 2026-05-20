@@ -35,6 +35,9 @@ apply: "应用"
 
 # ---- 应用标题 ----
 app_title: "rsTerm - 多终端模拟器"
+quit_with_sessions_title: "退出 rsTerm"
+quit_with_sessions_body: "仍有 %{count} 个未结束的会话，确定要退出吗？"
+quit_with_sessions_confirm: "退出"
 
 # ---- 首页 ----
 home_no_connections: "暂无保存的连接"
@@ -103,6 +106,9 @@ settings_ssh_env_desc: "新建 SSH 连接时注入的默认环境"
 
 # ---- 外观设置 ----
 settings_font_size: "字体大小"
+settings_terminal_font: "终端字体"
+settings_terminal_font_auto: "自动"
+settings_terminal_font_loading: "正在加载字体列表…"
 settings_line_spacing: "行间距"
 settings_cell_width: "字符宽度比例"
 settings_cursor_style: "光标样式"
@@ -117,6 +123,7 @@ settings_theme_colors_desc: "微调各个颜色值"
 theme_basic: "基础"
 theme_bg: "背景"
 theme_fg: "前景"
+theme_cursor: "光标色"
 theme_cursor_color: "光标色"
 theme_selection: "选中"
 theme_standard: "标准色"

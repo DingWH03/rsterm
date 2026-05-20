@@ -1,7 +1,10 @@
-pub mod paint;
+pub mod cursor;
+pub mod metrics;
 pub mod parser;
-pub mod renderer;
 pub mod screen;
+
+pub const DEFAULT_GRID_ROWS: usize = 24;
+pub const DEFAULT_GRID_COLS: usize = 80;
 
 use parser::{Parser, TermEvent};
 use screen::Screen;
@@ -395,6 +398,91 @@ mod tests {
     }
 
     #[test]
+    fn braille_graph_chars_are_stored_in_cells() {
+        let mut term = Terminal::new(1, 8);
+        term.write("⣿⢀⡀".as_bytes());
+        assert_eq!(term.screen.cells[0][0].ch, '⣿');
+        assert_eq!(term.screen.cells[0][1].ch, '⢀');
+        assert_eq!(term.screen.cells[0][2].ch, '⡀');
+    }
+
+    #[test]
+    fn alternate_screen_cub_moves_buffer_columns() {
+        let mut term = Terminal::new(10, 60);
+        term.write(b"\x1b[?1049h\x1b[2J");
+        term.write(b"\x1b[2;2H");
+        term.write(b"0123456789012345678901234567890123456789012345");
+        assert_eq!(term.screen.cursor_x, 47);
+        term.write(b"\x1b[1B");
+        assert_eq!(term.screen.cursor_y, 2);
+        assert_eq!(term.screen.cursor_x, 47);
+        term.write(b"\x1b[47D");
+        assert_eq!(
+            term.screen.cursor_x, 0,
+            "btop-style CUB must use buffer columns in alternate screen"
+        );
+    }
+
+    #[test]
+    fn alternate_screen_resize_clears_stale_cells() {
+        let mut term = Terminal::new(4, 20);
+        term.write(b"\x1b[?1049h\x1b[2J\x1b[H");
+        term.write(b"ROW0-OLD-CONTENT-HERE");
+        term.screen.resize(6, 30);
+        let row0: String = term.screen.cells[0].iter().map(|c| c.ch).collect();
+        assert!(
+            row0.trim().is_empty(),
+            "alternate buffer must be blank after resize until app redraws, got {row0:?}"
+        );
+    }
+
+    #[test]
+    fn alternate_screen_keeps_decsctbm_after_resize() {
+        let mut term = Terminal::new(24, 80);
+        term.write(b"\x1b[?1049h\x1b[2J\x1b[H\x1b[2;24r\x1b[1;1HBAT");
+        term.screen.resize(30, 100);
+        term.write(b"\x1b[1;1HBAT");
+        let top: String = term.screen.cells[0]
+            .iter()
+            .filter(|c| c.ch != ' ')
+            .map(|c| c.ch)
+            .collect();
+        assert!(
+            top.starts_with("BAT"),
+            "header row must stay on line 0 after SIGWINCH, got {top:?}"
+        );
+    }
+
+    #[test]
+    fn alternate_screen_cup_1_1_targets_top_row_with_decom_and_scroll_region() {
+        let rows = 24;
+        let mut term = Terminal::new(rows, 80);
+        term.write(b"\x1b[?1049h\x1b[2J\x1b[H");
+        term.write(b"\x1b[?6h");
+        term.write(format!("\x1b[2;{rows}r").as_bytes());
+        term.write(b"\x1b[1;1H");
+        term.write(b"cpu menu preset");
+        let top: String = term.screen.cells[0]
+            .iter()
+            .filter(|c| c.ch != ' ')
+            .map(|c| c.ch)
+            .collect();
+        assert!(
+            top.starts_with("cpu"),
+            "status bar must paint on screen row 0 (Konsole/btop), got row0={top:?}"
+        );
+        let second: String = term.screen.cells[1]
+            .iter()
+            .filter(|c| c.ch != ' ')
+            .map(|c| c.ch)
+            .collect();
+        assert!(
+            !second.starts_with("cpu"),
+            "status bar must not be shifted to row 1, got row1={second:?}"
+        );
+    }
+
+    #[test]
     fn alternate_screen_uses_full_height_after_decsctbm() {
         let mut term = Terminal::new(5, 10);
         term.write(b"\x1b[2;4r");
@@ -440,7 +528,6 @@ mod tests {
         assert_ne!(gray, theme.fg);
     }
 
-    #[test]
     #[test]
     fn gray_suggest_chinese_does_not_shift_left() {
         let mut term = Terminal::new(1, 60);

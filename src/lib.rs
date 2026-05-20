@@ -6,7 +6,7 @@
 )]
 
 // Load all locale files from the `locales` directory at compile time.
-rust_i18n::i18n!("locales");
+rust_i18n::i18n!("locales", fallback = "en");
 
 pub mod app;
 pub mod config;
@@ -29,7 +29,13 @@ pub fn run_app(native_options: eframe::NativeOptions) {
         "rsTerm",
         native_options,
         Box::new(|cc| {
-            fonts::setup_fonts(&cc.egui_ctx);
+            let settings = crate::settings::load_settings();
+            settings.language.apply();
+            fonts::setup_fonts(
+                &cc.egui_ctx,
+                &settings.default_profile().terminal_font,
+            );
+            fonts::preload_monospace_catalog();
             fonts::tune_android_display(&cc.egui_ctx);
             Ok(Box::new(RstermApp::default()))
         }),

@@ -1,4 +1,5 @@
 use crate::config::{BellStyle, CursorStyle, TerminalTheme, TerminalType};
+use crate::fonts;
 use crate::i18n::Language;
 use crate::settings::{AppSettings, Profile};
 use crate::ui::keyboard::KeyboardMode;
@@ -566,8 +567,8 @@ fn general_tab(ui: &mut egui::Ui, settings: &mut AppSettings) {
 
     section_env_card(
         ui,
-        &rust_i18n::t!("settings_section_ssh_env"),
-        &rust_i18n::t!("settings_section_ssh_env_desc"),
+        &rust_i18n::t!("settings_ssh_env"),
+        &rust_i18n::t!("settings_ssh_env_desc"),
         "ssh_env",
         &mut settings.ssh_env_vars,
     );
@@ -733,6 +734,67 @@ fn profile_selector(
     });
 }
 
+fn terminal_font_display_label(profile: &Profile) -> String {
+    if profile.terminal_font.is_empty() {
+        return rust_i18n::t!("settings_terminal_font_auto").into_owned();
+    }
+    std::path::Path::new(&profile.terminal_font)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|s| s.to_owned())
+        .unwrap_or_else(|| profile.terminal_font.clone())
+}
+
+fn terminal_font_row(ui: &mut egui::Ui, layout: SettingsFormLayout, profile: &mut Profile) {
+    layout.form_row(ui, &rust_i18n::t!("settings_terminal_font"), |ui, _| {
+        match fonts::monospace_catalog_status() {
+            fonts::MonospaceCatalogStatus::Loading => {
+                ui.add_enabled_ui(false, |ui| {
+                    egui::ComboBox::from_id_salt("settings_terminal_font")
+                        .selected_text(terminal_font_display_label(profile))
+                        .width(ui.available_width())
+                        .show_ui(ui, |_| {});
+                });
+                ui.label(
+                    egui::RichText::new(rust_i18n::t!("settings_terminal_font_loading"))
+                        .small()
+                        .weak(),
+                );
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(150));
+            }
+            fonts::MonospaceCatalogStatus::Ready(entries) => {
+                let entries = entries.as_slice();
+                let selected = entries
+                    .iter()
+                    .position(|e| e.path == profile.terminal_font)
+                    .unwrap_or(0);
+                let selected_label = entries[selected].label.as_str();
+                let mut changed = false;
+                egui::ComboBox::from_id_salt("settings_terminal_font")
+                    .selected_text(selected_label)
+                    .width(ui.available_width())
+                    .show_ui(ui, |ui| {
+                        ui.set_min_width(280.0);
+                        for (idx, entry) in entries.iter().enumerate() {
+                            if ui
+                                .selectable_label(selected == idx, &entry.label)
+                                .clicked()
+                            {
+                                profile.terminal_font = entry.path.clone();
+                                changed = true;
+                            }
+                        }
+                    });
+                if changed {
+                    fonts::apply_terminal_fonts(ui.ctx(), &profile.terminal_font);
+                    ui.ctx().request_repaint();
+                }
+            }
+        }
+    });
+}
+
 fn appearance_tab(ui: &mut egui::Ui, settings: &mut AppSettings, profile_idx: usize) {
     let Some(profile) = settings.profiles.get_mut(profile_idx) else {
         ui.colored_label(egui::Color32::YELLOW, rust_i18n::t!("settings_profile_not_found"));
@@ -740,10 +802,11 @@ fn appearance_tab(ui: &mut egui::Ui, settings: &mut AppSettings, profile_idx: us
     };
     section_form(
         ui,
-        &rust_i18n::t!("settings_section_appearance"),
-        &rust_i18n::t!("settings_section_appearance_desc"),
+        &rust_i18n::t!("settings_tab_appearance"),
+        "",
         "appearance",
         |ui, layout| {
+            terminal_font_row(ui, layout, profile);
             slider_row(ui, layout, &rust_i18n::t!("settings_font_size"), &mut profile.font_size, 8.0..=32.0);
             slider_row(ui, layout, &rust_i18n::t!("settings_line_spacing"), &mut profile.line_spacing, 0.5..=2.0);
             slider_row(ui, layout, &rust_i18n::t!("settings_cell_width"), &mut profile.cell_width_scale, 0.5..=1.5);

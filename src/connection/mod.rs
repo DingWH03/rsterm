@@ -191,11 +191,8 @@ impl ConnectionHandle {
 impl Drop for ConnectionHandle {
     fn drop(&mut self) {
         let _ = self.sender.send(ConnOut::Close);
-        if let Some(j) = self._writer_thread.take() {
-            let _ = j.join();
-        }
-        if let Some(j) = self._reader_thread.take() {
-            let _ = j.join();
-        }
+        // Do not join I/O threads here: blocking read/write on PTY/SSH can freeze UI shutdown.
+        drop(self._writer_thread.take());
+        drop(self._reader_thread.take());
     }
 }

@@ -350,6 +350,7 @@ impl Screen {
             self.cursor_y = 0;
             self.scroll_top = 0;
             self.scroll_bottom = self.rows.saturating_sub(1);
+            self.origin_mode = false;
             self.pending_cr = false;
             self.suppress_extra_crlf_newline = false;
             return;
@@ -376,6 +377,7 @@ impl Screen {
         self.cursor_y = 0;
         self.scroll_top = 0;
         self.scroll_bottom = self.rows.saturating_sub(1);
+        self.origin_mode = false;
         self.current_attrs = self.default_attrs;
         self.pending_cr = false;
         self.suppress_extra_crlf_newline = false;
@@ -438,8 +440,17 @@ impl Screen {
 
         let old_rows = self.rows;
         let old_cols = self.cols;
-        let in_alt = self.in_alternate_screen();
-        self.cells = Self::resize_grid(&self.cells, old_rows, old_cols, rows, cols);
+        if self.in_alternate_screen() {
+            // Full-screen TUIs repaint after SIGWINCH; keeping old cells causes ghost rows (btop).
+            self.cells = vec![vec![Cell::default(); cols]; rows];
+            self.cursor_x = 0;
+            self.cursor_y = 0;
+            self.scroll_top = 0;
+            self.scroll_bottom = rows.saturating_sub(1);
+            self.origin_mode = false;
+        } else {
+            self.cells = Self::resize_grid(&self.cells, old_rows, old_cols, rows, cols);
+        }
         if let Some(main) = self.saved_main.as_mut() {
             main.cells = Self::resize_grid(&main.cells, old_rows, old_cols, rows, cols);
         }
@@ -447,11 +458,9 @@ impl Screen {
         self.cols = cols;
         self.cursor_y = self.cursor_y.min(rows.saturating_sub(1));
         self.cursor_x = self.cursor_x.min(cols.saturating_sub(1));
-        self.scroll_top = self.scroll_top.min(rows.saturating_sub(1));
-        self.scroll_bottom = rows.saturating_sub(1);
-        if in_alt {
-            self.scroll_top = 0;
+        if !self.in_alternate_screen() {
             self.scroll_bottom = rows.saturating_sub(1);
+            self.scroll_top = self.scroll_top.min(self.scroll_bottom);
         }
 
         let mut tab_stops = vec![false; cols];
@@ -915,15 +924,25 @@ impl TermHandler for Screen {
                 self.cursor_y = (self.cursor_y + n).min(limit);
             }
             b'C' => {
-                // CUF - cursor forward
+                // CUF - cursor forward (buffer columns in TUIs; display columns for zsh on main)
                 let n = def(0, 1) as usize;
-                self.cursor_step_right(n);
-                self.normalize_cursor_x();
+                if self.in_alternate_screen() {
+                    self.cursor_x = (self.cursor_x + n).min(self.cols.saturating_sub(1));
+                    self.normalize_cursor_x();
+                } else {
+                    self.cursor_step_right(n);
+                    self.normalize_cursor_x();
+                }
             }
             b'D' => {
                 // CUB - cursor back
                 let n = def(0, 1) as usize;
-                self.cursor_step_left(n);
+                if self.in_alternate_screen() {
+                    self.cursor_x = self.cursor_x.saturating_sub(n);
+                    self.normalize_cursor_x();
+                } else {
+                    self.cursor_step_left(n);
+                }
             }
             b'E' => {
                 // CNL - cursor next line
@@ -1152,7 +1171,8 @@ impl TermHandler for Screen {
                 self.scroll_top = (top.saturating_sub(1)).min(self.rows.saturating_sub(1));
                 self.scroll_bottom = (bot.saturating_sub(1)).min(self.rows.saturating_sub(1));
                 self.cursor_x = 0;
-                self.cursor_y = 0;
+                // Home position is the top margin line (xterm DECSTBM), not always screen row 0.
+                self.cursor_y = self.scroll_top;
             }
             b'h' | b'l' => {
                 let set = final_byte == b'h';
@@ -1165,7 +1185,11 @@ impl TermHandler for Screen {
                         (1049, false) => self.leave_alternate_screen(true),
                         _ if private => match (p, set) {
                             (1, s) => self.app_cursor_keys = s,
-                            (6, s) => self.origin_mode = s,
+                            // DECOM in the alternate buffer breaks full-screen TUIs (btop/htop):
+                            // CUP 1;1 must target screen row 0, not scroll_top + 0.
+                            (6, s) => {
+                                self.origin_mode = s && !self.in_alternate_screen();
+                            }
                             (7, s) => self.auto_wrap = s,
                             (12, _) => {}
                             (25, s) => self.cursor_visible = s,
@@ -1180,6 +1204,9 @@ impl TermHandler for Screen {
                                 }
                             }
                             (1006, s) => self.mouse_sgr_encoding = s,
+                            (2026, _) => {
+                                // Synchronized updates: ignore; always paint the live buffer (vim/btop).
+                            }
                             _ => {}
                         },
                         (25, _) if !private => self.cursor_visible = set,
