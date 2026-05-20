@@ -119,6 +119,11 @@ pub struct Screen {
     /// Auto-wrap mode
     auto_wrap: bool,
 
+    /// Delayed auto-wrap state: after printing in the last column, xterm keeps the
+    /// cursor in the last column and wraps only before the next printable cell.
+    /// Immediate wrapping here makes full-screen TUIs such as btop scroll/tear.
+    pending_wrap: bool,
+
     /// Insert/replace mode
     insert_mode: bool,
 
@@ -176,6 +181,7 @@ struct MainScreenState {
     scroll_top: usize,
     scroll_bottom: usize,
     origin_mode: bool,
+    pending_wrap: bool,
 }
 
 impl Screen {
@@ -209,6 +215,7 @@ impl Screen {
             outgoing: Vec::new(),
             origin_mode: false,
             auto_wrap: true,
+            pending_wrap: false,
             insert_mode: false,
             app_cursor_keys: false,
             app_keypad: false,
@@ -354,6 +361,7 @@ impl Screen {
             self.origin_mode = false;
             self.current_attrs = self.default_attrs;
             self.pending_cr = false;
+            self.pending_wrap = false;
             self.suppress_extra_crlf_newline = false;
             self.in_zsh_line_pad = false;
             return;
@@ -371,6 +379,7 @@ impl Screen {
             scroll_top: self.scroll_top,
             scroll_bottom: self.scroll_bottom,
             origin_mode: self.origin_mode,
+            pending_wrap: self.pending_wrap,
         };
         if save_cursor {
             self.saved_cursor_x = snapshot.cursor_x;
@@ -384,6 +393,7 @@ impl Screen {
         self.origin_mode = false;
         self.current_attrs = self.default_attrs;
         self.pending_cr = false;
+        self.pending_wrap = false;
         self.suppress_extra_crlf_newline = false;
         self.in_zsh_line_pad = false;
     }
@@ -397,6 +407,7 @@ impl Screen {
         self.scroll_top = main.scroll_top;
         self.scroll_bottom = main.scroll_bottom;
         self.origin_mode = main.origin_mode;
+        self.pending_wrap = main.pending_wrap;
         if restore_cursor {
             self.cursor_x = main.cursor_x;
             self.cursor_y = main.cursor_y;
@@ -421,6 +432,7 @@ impl Screen {
             }
             self.cursor_x = 0;
             self.pending_cr = false;
+            self.pending_wrap = false;
         }
     }
 
@@ -463,6 +475,7 @@ impl Screen {
         self.cols = cols;
         self.cursor_y = self.cursor_y.min(rows.saturating_sub(1));
         self.cursor_x = self.cursor_x.min(cols.saturating_sub(1));
+        self.pending_wrap = false;
         if !self.in_alternate_screen() {
             self.scroll_bottom = rows.saturating_sub(1);
             self.scroll_top = self.scroll_top.min(self.scroll_bottom);
@@ -482,22 +495,35 @@ impl Screen {
         }
     }
 
-    fn ensure_cursor_fits(&mut self, width: usize) {
-        if width == 0 {
-            return;
+    fn apply_pending_wrap_before_print(&mut self) {
+        if self.pending_wrap {
+            self.pending_wrap = false;
+            if self.auto_wrap {
+                self.newline();
+                self.cursor_x = 0;
+            }
+        }
+    }
+
+    fn ensure_cursor_fits(&mut self, width: usize) -> bool {
+        if width == 0 || width > self.cols {
+            return false;
         }
         if self.cursor_x + width <= self.cols {
-            return;
+            return true;
         }
         if self.auto_wrap {
             self.newline();
             self.cursor_x = 0;
+            self.cursor_x + width <= self.cols
+        } else {
+            false
         }
     }
 
     pub fn put_char(&mut self, c: char) {
         let width = char_display_width(c);
-        if width == 0 {
+        if width == 0 || self.cols == 0 || self.rows == 0 {
             return;
         }
 
@@ -505,8 +531,12 @@ impl Screen {
             self.in_zsh_line_pad = true;
         }
         if self.in_zsh_line_pad && c == ' ' && self.cursor_x >= self.cols.saturating_sub(1) {
+            // zsh pads the line to the right edge before a CR.  Do not let those
+            // padding spaces consume the delayed-wrap state and scroll the screen.
             return;
         }
+
+        self.apply_pending_wrap_before_print();
 
         let attrs = self.current_attrs;
 
@@ -522,6 +552,11 @@ impl Screen {
             cell.ch = ' ';
             cell.wide_continuation = false;
             self.cells[row][col] = cell;
+            self.pending_wrap = false;
+            return;
+        }
+
+        if !self.ensure_cursor_fits(width) {
             return;
         }
 
@@ -530,20 +565,6 @@ impl Screen {
             for i in (self.cursor_x..self.cols.saturating_sub(width)).rev() {
                 row[i + width] = row[i];
             }
-        }
-
-        if self.cursor_x >= self.cols {
-            if self.auto_wrap {
-                self.newline();
-                self.cursor_x = 0;
-            } else {
-                return;
-            }
-        }
-
-        self.ensure_cursor_fits(width);
-        if self.cursor_x + width > self.cols {
-            return;
         }
 
         let row = self.cursor_y;
@@ -563,14 +584,17 @@ impl Screen {
             };
         }
 
-        self.cursor_x += width;
-        if self.cursor_x >= self.cols && self.auto_wrap {
-            self.newline();
-            self.cursor_x = 0;
+        if col + width >= self.cols {
+            self.cursor_x = self.cols.saturating_sub(1);
+            self.pending_wrap = self.auto_wrap;
+        } else {
+            self.cursor_x = col + width;
+            self.pending_wrap = false;
         }
     }
 
     pub fn newline(&mut self) {
+        self.pending_wrap = false;
         if self.cursor_y == self.scroll_bottom {
             self.scroll_up(1);
         } else {
@@ -581,6 +605,7 @@ impl Screen {
 
     /// BS (0x08): move cursor left without erasing (zsh uses this for line redraw).
     pub fn backspace(&mut self) {
+        self.pending_wrap = false;
         if self.cursor_x == 0 {
             return;
         }
@@ -623,6 +648,7 @@ impl Screen {
     }
 
     fn set_cursor_display_col(&mut self, target: usize) {
+        self.pending_wrap = false;
         let row = &self.cells[self.cursor_y];
         let mut display_col = 0usize;
         let mut col = 0usize;
@@ -663,6 +689,7 @@ impl Screen {
     }
 
     pub fn advance_tabs(&mut self) {
+        self.pending_wrap = false;
         for i in (self.cursor_x + 1)..self.cols {
             if self.tab_stops[i] {
                 self.cursor_x = i;
@@ -707,6 +734,7 @@ impl Screen {
         };
         self.cursor_y = row;
         self.cursor_x = col.min(self.cols.saturating_sub(1));
+        self.pending_wrap = false;
         self.normalize_cursor_x();
     }
 
@@ -812,9 +840,13 @@ impl TermHandler for Screen {
             0x0A | 0x0B | 0x0C => {
                 let preceded_by_cr = self.pending_cr;
                 self.pending_cr = false;
+                self.pending_wrap = false;
                 self.newline_from_lf(preceded_by_cr);
             }
-            0x0D => self.pending_cr = true,
+            0x0D => {
+                self.pending_wrap = false;
+                self.pending_cr = true;
+            }
             0x0E => {
                 self.flush_pending_cr();
                 self.charset = 1;
@@ -873,6 +905,7 @@ impl TermHandler for Screen {
                 // DECRC - restore cursor
                 self.cursor_x = self.saved_cursor_x.min(self.cols.saturating_sub(1));
                 self.cursor_y = self.saved_cursor_y.min(self.rows.saturating_sub(1));
+                self.pending_wrap = false;
             }
             b'=' => {
                 // DECKPAM - application keypad
@@ -919,17 +952,20 @@ impl TermHandler for Screen {
         match final_byte {
             b'A' => {
                 // CUU - cursor up
+                self.pending_wrap = false;
                 let n = def(0, 1) as usize;
                 self.cursor_y = self.cursor_y.saturating_sub(n);
             }
             b'B' => {
                 // CUD - cursor down
+                self.pending_wrap = false;
                 let n = def(0, 1) as usize;
                 let limit = self.rows.saturating_sub(1);
                 self.cursor_y = (self.cursor_y + n).min(limit);
             }
             b'C' => {
                 // CUF - cursor forward (buffer columns in TUIs; display columns for zsh on main)
+                self.pending_wrap = false;
                 let n = def(0, 1) as usize;
                 if self.in_alternate_screen() {
                     self.cursor_x = (self.cursor_x + n).min(self.cols.saturating_sub(1));
@@ -941,6 +977,7 @@ impl TermHandler for Screen {
             }
             b'D' => {
                 // CUB - cursor back
+                self.pending_wrap = false;
                 let n = def(0, 1) as usize;
                 if self.in_alternate_screen() {
                     self.cursor_x = self.cursor_x.saturating_sub(n);
@@ -951,6 +988,7 @@ impl TermHandler for Screen {
             }
             b'E' => {
                 // CNL - cursor next line
+                self.pending_wrap = false;
                 let n = def(0, 1) as usize;
                 self.cursor_x = 0;
                 let limit = self.rows.saturating_sub(1);
@@ -958,12 +996,14 @@ impl TermHandler for Screen {
             }
             b'F' => {
                 // CPL - cursor previous line
+                self.pending_wrap = false;
                 let n = def(0, 1) as usize;
                 self.cursor_x = 0;
                 self.cursor_y = self.cursor_y.saturating_sub(n);
             }
             b'G' => {
                 // CHA - cursor horizontal absolute
+                self.pending_wrap = false;
                 let n = def(0, 1) as usize;
                 self.cursor_x = (n.saturating_sub(1)).min(self.cols.saturating_sub(1));
             }
@@ -1065,6 +1105,7 @@ impl TermHandler for Screen {
             }
             b'd' => {
                 // VPA - vertical position absolute
+                self.pending_wrap = false;
                 let row = def(0, 1) as usize;
                 self.set_cursor(row.saturating_sub(1), self.cursor_x);
             }
@@ -1176,6 +1217,7 @@ impl TermHandler for Screen {
                 self.scroll_top = (top.saturating_sub(1)).min(self.rows.saturating_sub(1));
                 self.scroll_bottom = (bot.saturating_sub(1)).min(self.rows.saturating_sub(1));
                 self.cursor_x = 0;
+                self.pending_wrap = false;
                 // Home position is the top margin line (xterm DECSTBM), not always screen row 0.
                 self.cursor_y = self.scroll_top;
             }
@@ -1195,7 +1237,12 @@ impl TermHandler for Screen {
                             (6, s) => {
                                 self.origin_mode = s && !self.in_alternate_screen();
                             }
-                            (7, s) => self.auto_wrap = s,
+                            (7, s) => {
+                                self.auto_wrap = s;
+                                if !s {
+                                    self.pending_wrap = false;
+                                }
+                            }
                             (12, _) => {}
                             (25, s) => self.cursor_visible = s,
                             (2004, s) => self.bracketed_paste = s,
@@ -1235,6 +1282,7 @@ impl TermHandler for Screen {
                 // SCORC - restore cursor position
                 self.cursor_x = self.saved_cursor_x.min(self.cols.saturating_sub(1));
                 self.cursor_y = self.saved_cursor_y.min(self.rows.saturating_sub(1));
+                self.pending_wrap = false;
             }
             b't' => {
                 // Window manipulation (xterm)
