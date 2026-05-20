@@ -816,7 +816,10 @@ mod tests {
 
     #[test]
     fn btop_real_output_test() {
-        let data = include_bytes!("/tmp/btop_data.bin");
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/btop_data.bin"
+        ));
         let mut term = Terminal::new(35, 100);
         term.write(data);
 
