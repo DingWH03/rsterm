@@ -1,10 +1,11 @@
 use std::time::{Duration, Instant};
 
-use crate::config::TerminalTheme;
+use crate::config::{CursorStyle, TerminalTheme};
 use crate::connection::{ConnIn, ConnectionState};
 use crate::platform::{foreground_command, title_is_idle_host, truncate_label};
 use crate::storage::types::ConnectionType;
 use crate::terminal::parser::TermEvent;
+use crate::terminal::paint::paint_cursor;
 use crate::terminal::renderer::TerminalRenderer;
 use crate::ui::clipboard::{read_text, write_text};
 use crate::ui::keyboard::VirtualKeyboard;
@@ -92,6 +93,7 @@ pub fn connection_view(
     renderer: &mut TerminalRenderer,
     keyboard: &mut VirtualKeyboard,
     theme: &TerminalTheme,
+    cursor_style: CursorStyle,
     font_size: &mut f32,
     sidebar: &mut Sidebar,
 ) -> ConnectionViewAction {
@@ -545,13 +547,17 @@ pub fn connection_view(
                 && screen.cursor_y < grid_rows
                 && screen.cursor_x < grid_cols
             {
-                let cx = grid_rect.left() + screen.cursor_x as f32 * cell_w;
-                let cy = grid_rect.top() + screen.cursor_y as f32 * cell_h;
-                painter.rect_stroke(
-                    egui::Rect::from_min_size(egui::pos2(cx, cy), egui::vec2(cell_w, cell_h)),
-                    egui::CornerRadius::ZERO,
-                    egui::Stroke::new(1.0, theme.cursor),
-                    egui::StrokeKind::Inside,
+                // Schedule repaint for cursor blink.
+                ctx.request_repaint_after(std::time::Duration::from_millis(530));
+                paint_cursor(
+                    &painter,
+                    screen,
+                    theme,
+                    grid_rect,
+                    cell_w,
+                    cell_h,
+                    cursor_style,
+                    Some(std::time::Instant::now()),
                 );
             }
 

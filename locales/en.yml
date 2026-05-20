@@ -20,6 +20,18 @@ name: "Name"
 settings: "Settings"
 yes: "Yes"
 no: "No"
+confirm: "Confirm"
+copy: "Copy"
+rename: "Rename"
+export: "Export"
+import: "Import"
+browse: "Browse"
+duplicate: "Duplicate"
+description: "Description"
+enabled: "Enabled"
+disabled: "Disabled"
+reset: "Reset"
+apply: "Apply"
 
 # ---- App Title ----
 app_title: "rsTerm - Multi Terminal Emulator"
@@ -67,29 +79,45 @@ dialog_next_time_hint: "These settings are used the next time you open a local t
 # ---- Settings Page ----
 settings_terminal_running_hint: "Terminal continues running in the background"
 settings_section_profiles: "Profiles"
-settings_section_profiles_desc: "Manage terminal themes, keyboard and other customization (import/export coming soon)"
+settings_section_profiles_desc: "Manage terminal themes, keyboard and other customization"
 settings_current_default: "Current default:"
 settings_set_default: "Set Default"
 settings_new_profile_hint: "New profile name…"
 settings_create_profile: "New Profile"
 settings_profile_not_found: "Default profile not found"
-settings_section_appearance: "Appearance"
-settings_section_appearance_desc: "Font, scrollback buffer & default keyboard"
-settings_font_size: "Font Size"
-settings_scrollback_lines: "Scrollback Lines"
-settings_default_keyboard: "Default Keyboard"
-settings_keyboard_full: "Full Keyboard"
-settings_keyboard_special: "Function Keys"
-settings_theme_colors: "Theme Colors"
-settings_section_ssh_env: "SSH Environment Variables"
-settings_section_ssh_env_desc: "Default environment injected for new SSH connections"
 settings_no_variables: "No variables"
 
-# ---- Theme Color Editor ----
+# ---- Settings Tabs ----
+settings_tab_general: "General"
+settings_tab_appearance: "Appearance"
+settings_tab_colors: "Colors"
+settings_tab_terminal: "Terminal"
+settings_tab_advanced: "Advanced"
+settings_tab_profiles: "Profiles"
+
+# ---- General Settings ----
+settings_language: "Language"
+settings_language_desc: "Changes take effect immediately"
+settings_ssh_env: "SSH Environment Variables"
+settings_ssh_env_desc: "Default environment injected for new SSH connections"
+
+# ---- Appearance Settings ----
+settings_font_size: "Font Size"
+settings_line_spacing: "Line Spacing"
+settings_cell_width: "Cell Width Scale"
+settings_cursor_style: "Cursor Style"
+settings_bold_is_bright: "Bold is Bright"
+settings_bold_is_bright_desc: "Render bold text using bright colors"
+
+# ---- Color Theme ----
+settings_theme_preset: "Theme Preset"
+settings_theme_preset_desc: "Choose a built-in color scheme"
+settings_theme_colors: "Custom Colors"
+settings_theme_colors_desc: "Fine-tune individual color values"
 theme_basic: "Basic"
 theme_bg: "Background"
 theme_fg: "Foreground"
-theme_cursor: "Cursor"
+theme_cursor_color: "Cursor"
 theme_selection: "Selection"
 theme_standard: "Standard"
 theme_black: "Black"
@@ -110,10 +138,56 @@ theme_bright_magenta: "Bright Magenta"
 theme_bright_cyan: "Bright Cyan"
 theme_bright_white: "Bright White"
 
+# ---- Terminal Behavior ----
+settings_scrollback_lines: "Scrollback Lines"
+settings_scrollback_lines_desc: "Maximum number of lines kept in scrollback buffer"
+settings_terminal_type: "Terminal Type"
+settings_terminal_type_desc: "Reported to applications via $TERM"
+settings_bell: "Terminal Bell"
+settings_bell_desc: "Behavior when receiving BEL character"
+settings_bell_off: "Off"
+settings_bell_visual: "Visual Flash"
+settings_bell_audible: "System Beep"
+settings_bell_both: "Flash + Beep"
+settings_bracketed_paste: "Bracketed Paste"
+settings_bracketed_paste_desc: "Wrap pasted multi-line text with escape sequences"
+settings_sgr_mouse: "SGR Mouse Reporting"
+settings_sgr_mouse_desc: "Support mouse coordinates beyond 223 columns"
+settings_auto_wrap: "Auto Wrap"
+settings_auto_wrap_desc: "Wrap cursor to next line at right margin"
+settings_word_separators: "Word Separators"
+settings_word_separators_desc: "Characters that delimit words for double-click selection"
+
+# ---- Advanced Settings ----
+settings_default_keyboard: "Default Keyboard"
+settings_keyboard_full: "Full Keyboard"
+settings_keyboard_special: "Function Keys"
+settings_env_vars: "Environment Variables"
+settings_env_vars_desc: "Environment variables injected on terminal startup"
+settings_profile_desc: "Profile Description"
+settings_profile_desc_hint: "Optional description…"
+
+# ---- Profile Manager ----
+profiles_title: "Profile Manager"
+profiles_duplicate: "Duplicate"
+profiles_export: "Export"
+profiles_import: "Import"
+profiles_import_title: "Import Profile"
+profiles_import_hint: "Paste JSON content or select a file to import"
+profiles_import_from_clipboard: "From Clipboard"
+profiles_import_success: "Profile imported successfully"
+profiles_import_failed: "Import failed: invalid JSON format"
+profiles_delete_confirm: "Are you sure you want to delete profile \"{name}\"?"
+profiles_no_profiles: "No profiles"
+profiles_default_badge: "Default"
+
 # ---- Cursor Style ----
 cursor_bar: "Bar"
 cursor_block: "Block"
 cursor_underline: "Underline"
+cursor_bar_blink: "Bar (Blink)"
+cursor_block_blink: "Block (Blink)"
+cursor_underline_blink: "Underline (Blink)"
 
 # ---- Connection Failed ----
 connection_failed: "Connection failed"
@@ -129,3 +203,59 @@ language: "Language"
 language_system: "Follow System"
 language_zh: "中文"
 language_en: "English"
+
+# ---- Settings Tabs ----
+settings_tab_general: "General"
+settings_tab_profiles: "Profiles"
+settings_tab_appearance: "Appearance"
+settings_tab_theme: "Theme"
+settings_tab_behavior: "Behavior"
+settings_tab_advanced: "Advanced"
+
+# ---- UI Theme ----
+ui_theme: "UI Theme"
+ui_theme_system: "Follow System"
+ui_theme_light: "Light"
+ui_theme_dark: "Dark"
+
+# ---- Profile Management ----
+settings_no_profiles: "No profiles"
+settings_profile_detail: "Edit Profile"
+settings_profile_name: "Profile Name:"
+settings_profile_description: "Description:"
+settings_duplicate_profile: "Duplicate Profile"
+settings_export_profile: "Export (Copy to Clipboard)"
+settings_import_profile: "Import (From Clipboard)"
+
+# ---- Appearance ----
+settings_line_spacing: "Line Spacing"
+settings_cell_width: "Cell Width"
+settings_cursor_style: "Cursor Style"
+settings_bold_is_bright: "Bold uses bright colors"
+
+# ---- Cursor Style (Blink variants) ----
+cursor_bar_blink: "Bar (Blink)"
+cursor_block_blink: "Block (Blink)"
+cursor_underline_blink: "Underline (Blink)"
+
+# ---- Terminal Behavior ----
+settings_terminal_behavior: "Terminal Behavior"
+settings_terminal_behavior_desc: "Terminal type, bell, and input behavior"
+settings_terminal_type: "Terminal Type ($TERM)"
+settings_bell: "Bell"
+settings_bell_off: "Off"
+settings_bell_visual: "Visual"
+settings_bell_audible: "Audible"
+settings_bell_both: "Visual + Audible"
+settings_bracketed_paste: "Bracketed Paste Mode"
+settings_sgr_mouse: "SGR Mouse Support"
+settings_auto_wrap: "Auto Wrap"
+settings_word_separators: "Word Separators"
+
+# ---- Environment Variables ----
+settings_env_vars: "Environment Variables"
+settings_env_vars_desc: "Environment variables injected into the terminal session"
+
+# ---- Theme Presets ----
+settings_theme_preset: "Theme Preset"
+settings_theme_preset_desc: "Apply a built-in color scheme"

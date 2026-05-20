@@ -415,6 +415,8 @@ impl RstermApp {
 impl eframe::App for RstermApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx();
+        // Apply UI theme on every frame (cheap — only changes if setting changed).
+        self.settings.ui_theme.apply(ctx);
         self.sidebar.sync_width(ctx.content_rect().width());
         show_connection_notice(ctx, &mut self.connection_notice);
 
@@ -645,12 +647,14 @@ impl eframe::App for RstermApp {
                         match &mut self.sessions[idx] {
                             WorkspaceSession::Terminal(term) => {
                                 let theme = self.settings.theme();
+                                let cursor_style = self.settings.cursor_style();
                                 view_action = connection_view(
                                     ui,
                                     Some(term),
                                     &mut self.terminal_renderer,
                                     &mut self.virtual_keyboard,
                                     theme,
+                                    cursor_style,
                                     &mut self.live_font_size,
                                     &mut self.sidebar,
                                 );

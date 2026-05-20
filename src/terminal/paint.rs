@@ -147,6 +147,7 @@ pub fn paint_cursor(
     cell_w: f32,
     cell_h: f32,
     style: CursorStyle,
+    now: Option<std::time::Instant>,
 ) {
     let rows = screen.rows;
     let cols = screen.cols;
@@ -155,6 +156,20 @@ pub fn paint_cursor(
     }
     if !screen.cursor_visible || screen.cursor_y >= rows || screen.cursor_x >= cols {
         return;
+    }
+
+    // Blink handling: for Blink variants, hide the cursor for ~500ms every second.
+    let is_blink = matches!(
+        style,
+        CursorStyle::BarBlink | CursorStyle::BlockBlink | CursorStyle::UnderlineBlink
+    );
+    if is_blink {
+        if let Some(now) = now {
+            // Toggle visibility every 530ms (standard terminal blink rate).
+            if (now.elapsed().as_millis() / 530) % 2 == 1 {
+                return;
+            }
+        }
     }
 
     let row = screen
@@ -173,13 +188,13 @@ pub fn paint_cursor(
     );
 
     match style {
-        CursorStyle::Bar => {
+        CursorStyle::Bar | CursorStyle::BarBlink => {
             const BAR_WIDTH: f32 = 2.0;
             let bar_w = BAR_WIDTH.min(cell_w);
             let bar_rect = egui::Rect::from_min_size(egui::pos2(cx, cy), egui::vec2(bar_w, cell_h));
             painter.rect_filled(bar_rect, egui::CornerRadius::ZERO, theme.cursor);
         }
-        CursorStyle::Block => {
+        CursorStyle::Block | CursorStyle::BlockBlink => {
             painter.rect_stroke(
                 cell_rect,
                 egui::CornerRadius::ZERO,
@@ -187,7 +202,7 @@ pub fn paint_cursor(
                 egui::StrokeKind::Inside,
             );
         }
-        CursorStyle::Underline => {
+        CursorStyle::Underline | CursorStyle::UnderlineBlink => {
             const LINE_HEIGHT: f32 = 2.0;
             let line_h = LINE_HEIGHT.min(cell_h * 0.2);
             let line_rect = egui::Rect::from_min_max(

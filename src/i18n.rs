@@ -8,6 +8,8 @@
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
+// ─── Language ─────────────────────────────────────────────────────────────────
+
 /// Supported languages for the UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -54,7 +56,57 @@ impl Default for Language {
     }
 }
 
-/// Detect the system locale and map it to a supported locale code.
+// ─── UI Theme ─────────────────────────────────────────────────────────────────
+
+/// UI appearance theme (separate from terminal themes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UiTheme {
+    System,
+    Light,
+    Dark,
+}
+
+impl UiTheme {
+    pub const ALL: [Self; 3] = [Self::System, Self::Light, Self::Dark];
+
+    pub fn label(self) -> String {
+        match self {
+            Self::System => t!("ui_theme_system").into_owned(),
+            Self::Light => t!("ui_theme_light").into_owned(),
+            Self::Dark => t!("ui_theme_dark").into_owned(),
+        }
+    }
+
+    /// Apply this theme to the egui context.
+    pub fn apply(self, ctx: &egui::Context) {
+        let theme = match self {
+            Self::System => {
+                let dark = std::env::var("COLORFGBG")
+                    .ok()
+                    .and_then(|v| v.split(';').last().map(|s| s.trim() == "0"))
+                    .unwrap_or(false)
+                    || std::env::var("GTK_THEME")
+                        .ok()
+                        .map(|t| t.contains("dark") || t.contains("Dark"))
+                        .unwrap_or(false);
+                if dark { egui::Visuals::dark() } else { egui::Visuals::light() }
+            }
+            Self::Light => egui::Visuals::light(),
+            Self::Dark => egui::Visuals::dark(),
+        };
+        ctx.set_visuals(theme);
+    }
+}
+
+impl Default for UiTheme {
+    fn default() -> Self {
+        Self::System
+    }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 fn detect_system_locale() -> &'static str {
     let locale = sys_locale::get_locale().unwrap_or_else(|| String::from("en"));
     if locale.starts_with("zh") {
