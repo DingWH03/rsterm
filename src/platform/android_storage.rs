@@ -1,6 +1,8 @@
 //! Android external storage: manifest permissions + runtime prompts.
 //! Also handles BLE runtime permission requests (Android 12+).
 
+use std::sync::OnceLock;
+
 use jni::errors::Error;
 use jni::objects::{JObject, JObjectArray, JString, JValue};
 use jni::{jni_sig, jni_str, Env, JavaVM};
@@ -11,6 +13,8 @@ const PERM_WRITE: &str = "android.permission.WRITE_EXTERNAL_STORAGE";
 const PERMISSION_GRANTED: i32 = 0;
 const REQUEST_CODE_STORAGE: i32 = 42;
 const REQUEST_CODE_BLE: i32 = 43;
+
+static ANDROID_APP: OnceLock<AndroidApp> = OnceLock::new();
 
 /// BLE permissions needed on Android 12+ (API 31+).
 const PERM_BLE_SCAN: &str = "android.permission.BLUETOOTH_SCAN";
@@ -167,16 +171,71 @@ fn ensure_all_files_access(env: &mut Env<'_>, activity: &JObject) -> Result<(), 
 /// - API 29-30: `ACCESS_FINE_LOCATION`
 /// - API ≤ 28 : `ACCESS_COARSE_LOCATION`
 pub fn ensure_bluetooth_access(app: &AndroidApp) {
+    let _ = ANDROID_APP.set(app.clone());
+    request_bluetooth_access();
+}
+
+/// Re-request BLE permissions from UI code before starting a scan.
+///
+/// Android permission prompts are asynchronous; callers should start scanning only after
+/// [`has_bluetooth_access`] returns true.
+pub fn request_bluetooth_access() {
+    let Some(app) = ANDROID_APP.get().cloned() else {
+        log::warn!("BLE permission request skipped: Android app is not initialized");
+        return;
+    };
+
     let worker = app.clone();
-    app.clone().run_on_java_main_thread(Box::new(move || {
+    app.run_on_java_main_thread(Box::new(move || {
         if let Err(e) = request_ble_permissions(&worker) {
             log::warn!("BLE permission request failed: {e}");
         }
     }));
 }
 
+/// Whether every Android runtime permission needed for BLE scanning is currently granted.
+pub fn has_bluetooth_access() -> bool {
+    let Some(app) = ANDROID_APP.get() else {
+        return false;
+    };
+
+    match check_ble_permissions(app) {
+        Ok(granted) => granted,
+        Err(e) => {
+            log::warn!("BLE permission check failed: {e}");
+            false
+        }
+    }
+}
+
 const PERM_BLE_FINE_LOC: &str = "android.permission.ACCESS_FINE_LOCATION";
 const PERM_BLE_COARSE_LOC: &str = "android.permission.ACCESS_COARSE_LOCATION";
+
+fn check_ble_permissions(app: &AndroidApp) -> Result<bool, String> {
+    let jvm = unsafe { JavaVM::from_raw(app.vm_as_ptr() as *mut jni::sys::JavaVM) };
+    jvm.attach_current_thread(|env| -> Result<bool, Error> {
+        let sdk = sdk_int(env)?;
+        let activity = activity_jobject(env, app);
+
+        if sdk >= 31 {
+            return Ok(
+                has_permission(env, &activity, PERM_BLE_SCAN)?
+                    && has_permission(env, &activity, PERM_BLE_CONNECT)?,
+            );
+        }
+
+        if (29..=30).contains(&sdk) {
+            return has_permission(env, &activity, PERM_BLE_FINE_LOC);
+        }
+
+        if sdk <= 28 {
+            return has_permission(env, &activity, PERM_BLE_COARSE_LOC);
+        }
+
+        Ok(true)
+    })
+    .map_err(|e| format!("JNI: {e}"))
+}
 
 fn request_ble_permissions(app: &AndroidApp) -> Result<(), String> {
     let jvm = unsafe { JavaVM::from_raw(app.vm_as_ptr() as *mut jni::sys::JavaVM) };

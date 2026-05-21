@@ -13,7 +13,9 @@ mod shell;
 #[cfg(target_os = "android")]
 pub use android_ime::{bottom_inset_points, init as init_android_ime, top_inset_points};
 #[cfg(target_os = "android")]
-pub use android_storage::{ensure_bluetooth_access, ensure_storage_access};
+pub use android_storage::{
+    ensure_bluetooth_access, ensure_storage_access, has_bluetooth_access, request_bluetooth_access,
+};
 
 pub use process::{
     foreground_command, foreground_process_pid, local_user_at_host, ssh_user_at_host,

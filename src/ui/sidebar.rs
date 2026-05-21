@@ -113,14 +113,25 @@ impl Sidebar {
     {
         let rect = ctx.content_rect();
         let w = OVERLAY_WIDTH;
+        let top_inset = {
+            #[cfg(target_os = "android")]
+            {
+                crate::platform::top_inset_points(ctx)
+            }
+            #[cfg(not(target_os = "android"))]
+            {
+                0.0
+            }
+        };
+        let panel_height = (rect.height() - top_inset).max(1.0);
         egui::Area::new(egui::Id::new(panel_id))
             .order(egui::Order::Foreground)
-            .fixed_pos(rect.left_top())
+            .fixed_pos(egui::pos2(rect.left(), rect.top() + top_inset))
             .show(ctx, |ui| {
                 egui::Frame::side_top_panel(ui.style()).show(ui, |ui| {
                     ui.set_min_width(w);
-                    ui.set_min_height(rect.height());
-                    ui.set_max_height(rect.height());
+                    ui.set_min_height(panel_height);
+                    ui.set_max_height(panel_height);
                     body(ui);
                 });
             });

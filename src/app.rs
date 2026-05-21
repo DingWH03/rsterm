@@ -503,6 +503,63 @@ impl RstermApp {
         self.apply_session_panel_action(result.sessions, in_overlay);
     }
 
+    fn handle_back_navigation(&mut self, ctx: &egui::Context) -> bool {
+        if self.connection_notice.take().is_some() {
+            return true;
+        }
+        if self.show_quit_dialog {
+            self.show_quit_dialog = false;
+            return true;
+        }
+        if self.new_conn_dialog.open {
+            self.new_conn_dialog = NewConnectionDialog::default();
+            return true;
+        }
+        if self.local_term_dialog.open {
+            self.local_term_dialog = LocalTerminalSettingsDialog::default();
+            return true;
+        }
+        if self.sidebar.overlay_visible() {
+            self.sidebar.close_overlay();
+            return true;
+        }
+        if self.home_settings {
+            self.home_settings = false;
+            save_settings(&self.settings);
+            self.live_font_size = self.settings.font_size();
+            self.reload_terminal_fonts(ctx);
+            return true;
+        }
+        if self.workspace_settings {
+            self.workspace_settings = false;
+            save_settings(&self.settings);
+            self.live_font_size = self.settings.font_size();
+            self.reload_terminal_fonts(ctx);
+            return true;
+        }
+        if self.settings_open {
+            self.settings_open = false;
+            save_settings(&self.settings);
+            self.live_font_size = self.settings.font_size();
+            self.reload_terminal_fonts(ctx);
+            return true;
+        }
+        if self.page == Page::Workspace {
+            self.save_profile_tweaks();
+            self.page = Page::Home;
+            self.workspace_settings = false;
+            self.settings_open = false;
+            self.sidebar.close_overlay();
+            return true;
+        }
+        if self.has_open_sessions() {
+            self.show_quit_dialog = true;
+            return true;
+        }
+
+        false
+    }
+
     fn active_session_index(&self) -> Option<usize> {
         self.active_session_id
             .as_ref()
@@ -513,16 +570,24 @@ impl RstermApp {
 impl eframe::App for RstermApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if ctx.input(|i| i.viewport().close_requested()) {
-            if self.quit_after_close || !self.has_open_sessions() {
+            if self.quit_after_close {
                 return;
             }
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.show_quit_dialog = true;
+            if self.handle_back_navigation(ctx) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
         }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx();
+
+        #[cfg(target_os = "android")]
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            if !self.handle_back_navigation(ctx) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
         // Apply UI theme on every frame (cheap — only changes if setting changed).
         self.settings.ui_theme.apply(ctx);
         self.sidebar.sync_width(ctx.content_rect().width());

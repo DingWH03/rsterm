@@ -28,6 +28,7 @@ pub struct NewConnectionDialog {
     ble_devices: Vec<String>,
     ble_scanning: bool,
     ble_scan_rx: Option<mpsc::Receiver<Result<Vec<String>, String>>>,
+    ble_scan_error: Option<String>,
 }
 
 impl Default for NewConnectionDialog {
@@ -50,6 +51,7 @@ impl Default for NewConnectionDialog {
             ble_devices: Vec::new(),
             ble_scanning: false,
             ble_scan_rx: None,
+            ble_scan_error: None,
         }
     }
 }
@@ -164,6 +166,7 @@ impl NewConnectionDialog {
                         {
                             if self.conn_type != ct {
                                 self.conn_type = ct.clone();
+                                self.ble_scan_error = None;
                                 if ct == ConnectionType::Serial {
                                     self.refresh_serial_devices();
                                 }
@@ -264,6 +267,13 @@ impl NewConnectionDialog {
                                 self.start_ble_scan(ctx);
                             }
                         });
+                        if let Some(err) = &self.ble_scan_error {
+                            ui.label(
+                                egui::RichText::new(err)
+                                    .small()
+                                    .color(style::RED),
+                            );
+                        }
                         if self.ble_devices.is_empty() && !self.ble_scanning {
                             ui.label(
                                 egui::RichText::new(rust_i18n::t!("dialog_ble_scan_hint"))
@@ -399,6 +409,22 @@ impl NewConnectionDialog {
         if self.ble_scanning {
             return;
         }
+
+        self.ble_scan_error = None;
+
+        #[cfg(target_os = "android")]
+        {
+            if !crate::platform::has_bluetooth_access() {
+                crate::platform::request_bluetooth_access();
+                self.ble_scan_error = Some(
+                    "需要授予附近设备/蓝牙权限后才能扫描。请同意权限弹窗后再点一次扫描。"
+                        .to_string(),
+                );
+                ctx.request_repaint();
+                return;
+            }
+        }
+
         let (tx, rx) = mpsc::channel();
         self.ble_scan_rx = Some(rx);
         self.ble_scanning = true;
@@ -418,6 +444,7 @@ impl NewConnectionDialog {
             Ok(Ok(devices)) => {
                 self.ble_scanning = false;
                 self.ble_devices = devices;
+                self.ble_scan_error = None;
                 if self.ble_device.is_empty() {
                     if let Some(first) = self.ble_devices.first() {
                         self.ble_device = first.clone();
@@ -426,6 +453,7 @@ impl NewConnectionDialog {
             }
             Ok(Err(e)) => {
                 self.ble_scanning = false;
+                self.ble_scan_error = Some(format!("BLE 扫描失败：{e}"));
                 log::warn!("BLE scan failed: {e}");
             }
             Err(mpsc::TryRecvError::Empty) => {
@@ -433,6 +461,7 @@ impl NewConnectionDialog {
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.ble_scanning = false;
+                self.ble_scan_error = Some("BLE 扫描线程已结束，请重试。".to_string());
             }
         }
     }
