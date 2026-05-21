@@ -18,6 +18,7 @@ use crate::ui::home_sidebar::{paint_home_sidebar, HomeSidebarAction};
 use crate::ui::keyboard::VirtualKeyboard;
 use crate::ui::settings_page::{settings_page, settings_side_panel};
 use crate::ui::sidebar::{Sidebar, SidebarPage, DOCK_WIDTH};
+use crate::ui::style;
 use crate::ui::terminal_sidebar::{terminal_sidebar, TerminalSidebarAction};
 use log::info;
 
@@ -96,22 +97,36 @@ fn show_quit_confirm_dialog(
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .show(ctx, |ui| {
             ui.set_max_width(400.0);
+            ui.add_space(8.0);
             ui.label(
                 egui::RichText::new(rust_i18n::t!("quit_with_sessions_body", count = session_count))
-                    .size(14.0),
+                    .size(14.0)
+                    .color(ui.visuals().text_color()),
             );
-            ui.add_space(12.0);
+            ui.add_space(20.0);
             ui.horizontal(|ui| {
-                if ui.button(rust_i18n::t!("cancel")).clicked() {
+                let cancel_btn = egui::Button::new(
+                    egui::RichText::new(rust_i18n::t!("cancel"))
+                        .size(14.0)
+                        .color(ui.visuals().weak_text_color()),
+                )
+                .fill(ui.visuals().panel_fill)
+                .corner_radius(style::CORNER_RADIUS_SM)
+                .min_size(egui::vec2(90.0, 34.0));
+                if ui.add(cancel_btn).clicked() {
                     *open = false;
                 }
-                if ui
-                    .button(
-                        egui::RichText::new(rust_i18n::t!("quit_with_sessions_confirm"))
-                            .strong(),
-                    )
-                    .clicked()
-                {
+
+                let confirm_btn = egui::Button::new(
+                    egui::RichText::new(rust_i18n::t!("quit_with_sessions_confirm"))
+                        .size(14.0)
+                        .strong()
+                        .color(egui::Color32::WHITE),
+                )
+                .fill(style::RED)
+                .corner_radius(style::CORNER_RADIUS_SM)
+                .min_size(egui::vec2(100.0, 34.0));
+                if ui.add(confirm_btn).clicked() {
                     confirmed = true;
                     *open = false;
                 }
@@ -131,9 +146,22 @@ fn show_connection_notice(ctx: &egui::Context, notice: &mut Option<String>) {
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .show(ctx, |ui| {
             ui.set_max_width(420.0);
-            ui.label(egui::RichText::new(&msg).size(14.0));
-            ui.add_space(12.0);
-            if ui.button(rust_i18n::t!("ok")).clicked() {
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(&msg)
+                    .size(14.0)
+                    .color(ui.visuals().text_color()),
+            );
+            ui.add_space(16.0);
+            let ok_btn = egui::Button::new(
+                egui::RichText::new(rust_i18n::t!("ok"))
+                    .size(14.0)
+                    .color(egui::Color32::WHITE),
+            )
+            .fill(style::ACCENT)
+            .corner_radius(style::CORNER_RADIUS_SM)
+            .min_size(egui::vec2(80.0, 34.0));
+            if ui.add(ok_btn).clicked() {
                 dismiss = true;
             }
         });
@@ -750,12 +778,37 @@ impl eframe::App for RstermApp {
                         }
                     } else {
                         ui.vertical_centered(|ui| {
-                            ui.add_space(40.0);
-                            ui.label("No active terminal");
-                            ui.add_space(8.0);
+                            ui.add_space(60.0);
+                            ui.label(
+                                egui::RichText::new("\u{1F4BB}")
+                                    .size(40.0),
+                            );
+                            ui.add_space(12.0);
+                            ui.label(
+                                egui::RichText::new("No active terminal")
+                                    .size(16.0)
+                                    .color(ui.visuals().weak_text_color()),
+                            );
+                            ui.add_space(4.0);
+                            ui.label(
+                                egui::RichText::new("Open a terminal session to get started")
+                                    .size(12.0)
+                                    .color(ui.visuals().weak_text_color()),
+                            );
+                            ui.add_space(16.0);
                             #[cfg(not(target_os = "android"))]
-                            if ui.button("Open Local Terminal").clicked() {
-                                self.connect_local();
+                            {
+                                let btn = egui::Button::new(
+                                    egui::RichText::new("Open Local Terminal")
+                                        .size(14.0)
+                                        .color(egui::Color32::WHITE),
+                                )
+                                .fill(style::ACCENT)
+                                .corner_radius(style::CORNER_RADIUS_SM)
+                                .min_size(egui::vec2(180.0, 38.0));
+                                if ui.add(btn).clicked() {
+                                    self.connect_local();
+                                }
                             }
                         });
                     }

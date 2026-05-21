@@ -2,6 +2,7 @@ use crate::session::WorkspaceSession;
 use crate::ui::sidebar::Sidebar;
 use crate::ui::sidebar::SidebarPage;
 use crate::ui::sidebar_common::{sidebar_brand_row, sidebar_sessions_panel, SidebarSessionAction};
+use crate::ui::style;
 
 pub struct HomeSidebarResult {
     pub nav: HomeSidebarAction,
@@ -15,6 +16,42 @@ pub enum HomeSidebarAction {
     Settings,
 }
 
+fn nav_button(ui: &mut egui::Ui, icon: &str, label: &str, selected: bool) -> egui::Response {
+    let height = 36.0;
+    let width = ui.available_width();
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let bg = if selected {
+            ui.visuals().selection.bg_fill.gamma_multiply(0.35)
+        } else if resp.hovered() {
+            ui.visuals().widgets.hovered.bg_fill
+        } else {
+            egui::Color32::TRANSPARENT
+        };
+        if bg != egui::Color32::TRANSPARENT {
+            ui.painter().rect_filled(rect, style::CORNER_RADIUS_XS, bg);
+        }
+
+        let text = format!("{icon}  {label}");
+        let color = if selected {
+            ui.visuals().selection.stroke.color
+        } else {
+            ui.visuals().weak_text_color()
+        };
+        let galley = ui.fonts_mut(|f| {
+            f.layout(text, egui::FontId::proportional(14.0), color, f32::INFINITY)
+        });
+        ui.painter().galley(
+            egui::pos2(rect.left() + 10.0, rect.center().y - galley.size().y / 2.0),
+            galley,
+            color,
+        );
+    }
+
+    resp
+}
+
 pub fn paint_home_sidebar(
     ui: &mut egui::Ui,
     sidebar: &mut Sidebar,
@@ -26,28 +63,21 @@ pub fn paint_home_sidebar(
 ) -> HomeSidebarResult {
     let show_ham = in_overlay && sidebar.show_panel_hamburger(SidebarPage::Home);
     sidebar_brand_row(ui, sidebar, SidebarPage::Home, show_ham);
-    ui.add_space(2.0);
-    ui.separator();
+    ui.add_space(8.0);
 
     let mut nav_action = HomeSidebarAction::None;
-    if ui
-        .selectable_label(on_home, egui::RichText::new(format!("\u{2302}  {}", rust_i18n::t!("sidebar_home"))).size(14.0))
-        .clicked()
-    {
+
+    ui.add_space(2.0);
+    if nav_button(ui, "\u{2302}", &rust_i18n::t!("sidebar_home"), on_home).clicked() {
         nav_action = HomeSidebarAction::Home;
     }
-    if ui
-        .selectable_label(
-            on_settings,
-            egui::RichText::new(format!("\u{2699}  {}", rust_i18n::t!("settings"))).size(14.0),
-        )
-        .clicked()
-    {
+    if nav_button(ui, "\u{2699}", &rust_i18n::t!("settings"), on_settings).clicked() {
         nav_action = HomeSidebarAction::Settings;
     }
 
-    ui.add_space(4.0);
+    ui.add_space(8.0);
     ui.separator();
+    ui.add_space(4.0);
 
     let sessions_action = sidebar_sessions_panel(ui, sessions, active_session_id);
 

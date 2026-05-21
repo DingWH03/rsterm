@@ -13,6 +13,7 @@ use crate::ui::terminal_grid::{apply_resize, drain_after_resize};
 use crate::ui::clipboard::{read_text, write_text};
 use crate::ui::keyboard::VirtualKeyboard;
 use crate::ui::sidebar::{Sidebar, SidebarPage};
+use crate::ui::style;
 use crate::ui::terminal_input::{
     allocate_terminal_surface, lock_terminal_focus, process_keyboard_input,
     sync_android_soft_input, terminal_widget_id, TERMINAL_GRID_MARGIN,
@@ -124,7 +125,12 @@ pub fn connection_view(
         }
 
         let title = session.as_ref().map(|s| s.tab_label()).unwrap_or_default();
-        ui.label(egui::RichText::new(title).size(14.0).strong());
+        ui.label(
+            egui::RichText::new(title)
+                .size(14.0)
+                .strong()
+                .color(ui.visuals().text_color()),
+        );
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Font size quick controls
@@ -179,7 +185,7 @@ pub fn connection_view(
                 ui.label(egui::RichText::new("Fn").size(12.0).weak());
             }
 
-            if toolbar_button(ui, egui::RichText::new("✕").size(14.0).color(egui::Color32::RED)).clicked() {
+            if toolbar_button(ui, egui::RichText::new("✕").size(14.0).color(style::RED)).clicked() {
                 action = ConnectionViewAction::CloseSession;
             }
         });
@@ -678,7 +684,12 @@ fn size_label_visible(
 
 /// Header control: clickable but not in keyboard focus navigation (Tab/arrows).
 fn toolbar_button(ui: &mut egui::Ui, label: impl Into<egui::WidgetText>) -> egui::Response {
-    ui.add(egui::Button::new(label.into()).sense(egui::Sense::CLICK))
+    ui.add(
+        egui::Button::new(label.into())
+            .frame(false)
+            .corner_radius(style::CORNER_RADIUS_XS)
+            .sense(egui::Sense::CLICK),
+    )
 }
 
 /// Paste into the PTY. Use raw bytes at the shell prompt (immediate echo); bracketed only in alt-screen apps.

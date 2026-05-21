@@ -14,6 +14,7 @@ use crate::session::{
 };
 use crate::ui::file_transfer::{apply_transfer_done, PasteTarget};
 use crate::ui::sidebar::{Sidebar, SidebarPage};
+use crate::ui::style;
 
 #[derive(Default)]
 pub struct FileManagerAction {
@@ -83,9 +84,14 @@ pub fn file_manager_view(
         {
             sidebar.hamburger_click(SidebarPage::Workspace);
         }
-        ui.label(egui::RichText::new(&session.title).size(14.0).strong());
+        ui.label(
+            egui::RichText::new(&session.title)
+                .size(14.0)
+                .strong()
+                .color(ui.visuals().text_color()),
+        );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if toolbar_button(ui, egui::RichText::new("✕").size(14.0).color(egui::Color32::RED))
+            if toolbar_button(ui, egui::RichText::new("✕").size(14.0).color(style::RED))
                 .clicked()
             {
                 action.close = true;
@@ -233,7 +239,7 @@ fn toolbar_button(ui: &mut egui::Ui, label: impl Into<egui::WidgetText>) -> egui
     ui.add(
         egui::Button::new(label)
             .frame(false)
-            .corner_radius(egui::CornerRadius::same(4)),
+            .corner_radius(style::CORNER_RADIUS_XS),
     )
 }
 

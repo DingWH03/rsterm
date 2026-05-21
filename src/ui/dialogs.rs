@@ -3,6 +3,7 @@ use std::sync::mpsc;
 use crate::platform::{self, Capabilities};
 use crate::storage::types::{ConnectionType, SavedConnection};
 use crate::ui::devices::{enumerate_serial_ports, scan_ble_devices_blocking};
+use crate::ui::style;
 
 pub struct NewConnectionDialog {
     pub open: bool,
@@ -141,12 +142,24 @@ impl NewConnectionDialog {
                     ui.label(rust_i18n::t!("dialog_type"));
                     for ct in Self::available_types(&caps) {
                         let selected = self.conn_type == ct;
-                        let mut text = egui::RichText::new(ct.label());
-                        if selected {
-                            text = text.strong().color(egui::Color32::from_rgb(33, 150, 243));
-                        }
+                        let text_color = if selected {
+                            ui.visuals().selection.stroke.color
+                        } else {
+                            ui.visuals().weak_text_color()
+                        };
+                        let text = egui::RichText::new(ct.label())
+                            .size(13.0)
+                            .color(text_color);
+                        let btn = egui::Button::new(text)
+                            .fill(if selected {
+                                ui.visuals().selection.bg_fill.gamma_multiply(0.35)
+                            } else {
+                                egui::Color32::TRANSPARENT
+                            })
+                            .corner_radius(style::CORNER_RADIUS_SM)
+                            .min_size(egui::vec2(0.0, 30.0));
                         if ui
-                            .add_enabled(!editing, egui::Button::selectable(selected, text))
+                            .add_enabled(!editing, btn)
                             .clicked()
                         {
                             if self.conn_type != ct {
@@ -281,10 +294,18 @@ impl NewConnectionDialog {
                     }
                 }
 
-                ui.add_space(16.0);
+                ui.add_space(20.0);
 
                 ui.horizontal(|ui| {
-                    if ui.button(rust_i18n::t!("cancel")).clicked() {
+                    let cancel_btn = egui::Button::new(
+                        egui::RichText::new(rust_i18n::t!("cancel"))
+                            .size(14.0)
+                            .color(ui.visuals().weak_text_color()),
+                    )
+                    .fill(ui.visuals().panel_fill)
+                    .corner_radius(style::CORNER_RADIUS_SM)
+                    .min_size(egui::vec2(80.0, 34.0));
+                    if ui.add(cancel_btn).clicked() {
                         close = true;
                     }
 
@@ -301,8 +322,14 @@ impl NewConnectionDialog {
                     } else {
                         rust_i18n::t!("create")
                     };
+                    let create_btn = egui::Button::new(
+                        egui::RichText::new(save_label).size(14.0).color(egui::Color32::WHITE),
+                    )
+                    .fill(style::ACCENT)
+                    .corner_radius(style::CORNER_RADIUS_SM)
+                    .min_size(egui::vec2(100.0, 34.0));
                     if ui
-                        .add_enabled(can_create, egui::Button::new(save_label))
+                        .add_enabled(can_create, create_btn)
                         .clicked()
                     {
                         let mut conn = match &self.conn_type {

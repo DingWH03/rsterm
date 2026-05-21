@@ -11,6 +11,7 @@ pub mod sidebar_common;
 pub mod keyboard;
 pub mod settings_page;
 pub mod sidebar;
+pub mod style;
 pub mod terminal_sidebar;
 pub mod terminal_grid;
 pub mod terminal_paint;

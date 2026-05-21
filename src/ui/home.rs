@@ -1,5 +1,6 @@
 use crate::platform;
 use crate::storage::types::{ConnectionType, SavedConnection};
+use crate::ui::style;
 
 /// Direct actions from per-card toolbar icons (not context menus).
 #[derive(Default)]
@@ -24,6 +25,7 @@ pub fn home_screen(
 ) {
     let _ = settings_clicked;
 
+
     if platform::capabilities().local_terminal {
         let (local_body, local_file) =
             render_local_terminal_card(ui, selected_conn_id.is_none(), card_menu);
@@ -41,20 +43,49 @@ pub fn home_screen(
                 ui.close();
             }
         });
-        ui.add_space(8.0);
+        ui.add_space(style::CARD_SPACING);
     }
 
+    // ── Saved connections section ───────────────────────────────────────────
     if connections.is_empty() {
-        ui.add_space(20.0);
+        ui.add_space(32.0);
         ui.vertical_centered(|ui| {
             ui.label(
+                egui::RichText::new("\u{1F4CB}")
+                    .size(36.0),
+            );
+            ui.add_space(8.0);
+            ui.label(
                 egui::RichText::new(rust_i18n::t!("home_no_connections"))
-                    .size(14.0)
-                    .color(egui::Color32::GRAY),
+                    .size(15.0)
+                    .color(ui.visuals().weak_text_color()),
+            );
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new("Tap + to add your first connection")
+                    .size(12.0)
+                    .color(ui.visuals().weak_text_color()),
             );
         });
+        ui.add_space(8.0);
     } else {
-        ui.label(egui::RichText::new(rust_i18n::t!("home_saved_connections")).weak());
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(rust_i18n::t!("home_saved_connections"))
+                    .size(13.0)
+                    .color(ui.visuals().weak_text_color())
+                    .strong(),
+            );
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(format!("{}", connections.len()))
+                    .size(11.0)
+                    .color(ui.visuals().weak_text_color()),
+            );
+        });
+        ui.add_space(6.0);
+
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -96,7 +127,7 @@ pub fn home_screen(
                         }
                     });
 
-                    ui.add_space(6.0);
+                    ui.add_space(style::CARD_SPACING);
                 }
 
                 if let Some(i) = to_delete {
@@ -105,100 +136,74 @@ pub fn home_screen(
             });
     }
 
-    let fab_size = 52.0;
+    // ── Floating Action Button ──────────────────────────────────────────────
+    paint_fab(ui, fab_clicked);
+}
+
+// ─── FAB ──────────────────────────────────────────────────────────────────────
+
+fn paint_fab(ui: &mut egui::Ui, fab_clicked: &mut bool) {
+    let fab_size = 56.0;
+    let shadow_offset = 2.0;
     let fab_pos = egui::pos2(
-        ui.max_rect().right() - fab_size - 16.0,
-        ui.max_rect().bottom() - fab_size - 16.0,
+        ui.max_rect().right() - fab_size - 20.0,
+        ui.max_rect().bottom() - fab_size - 20.0 - shadow_offset,
     );
     let fab_rect = egui::Rect::from_min_size(fab_pos, egui::vec2(fab_size, fab_size));
     let fab_resp = ui.allocate_rect(fab_rect, egui::Sense::click());
     if fab_resp.clicked() {
         *fab_clicked = true;
     }
-    let painter = ui.painter_at(fab_rect);
-    painter.circle_filled(fab_rect.center(), fab_size / 2.0, egui::Color32::from_rgb(33, 150, 243));
-    let galley = ui.fonts_mut(|f| {
-        f.layout(
-            "+".to_string(),
-            egui::FontId::proportional(26.0),
+
+    if ui.is_rect_visible(fab_rect) {
+        let painter = ui.painter_at(fab_rect);
+
+        // Shadow
+        let shadow_rect = fab_rect.translate(egui::vec2(0.0, shadow_offset));
+        painter.circle_filled(shadow_rect.center(), fab_size / 2.0, egui::Color32::from_black_alpha(60));
+
+        // Main circle
+        let bg = if fab_resp.hovered() {
+            style::ACCENT.gamma_multiply(1.15)
+        } else {
+            style::ACCENT
+        };
+        painter.circle_filled(fab_rect.center(), fab_size / 2.0, bg);
+
+        // Plus icon
+        let galley = ui.fonts_mut(|f| {
+            f.layout(
+                "+".to_string(),
+                egui::FontId::proportional(28.0),
+                egui::Color32::WHITE,
+                f32::INFINITY,
+            )
+        });
+        painter.galley(
+            egui::pos2(
+                fab_rect.center().x - galley.rect.width() / 2.0,
+                fab_rect.center().y - galley.rect.height() / 2.0,
+            ),
+            galley,
             egui::Color32::WHITE,
-            f32::INFINITY,
-        )
-    });
-    painter.galley(
-        egui::pos2(
-            fab_rect.center().x - galley.rect.width() / 2.0,
-            fab_rect.center().y - galley.rect.height() / 2.0,
-        ),
-        galley,
-        egui::Color32::WHITE,
-    );
-}
-
-const CARD_H: f32 = 72.0;
-const ICON_SLOT: f32 = 40.0;
-const ICON_FONT: f32 = 22.0;
-const TOOLBAR_GAP: f32 = 2.0;
-const TOOLBAR_MARGIN: f32 = 12.0;
-
-const FILE_ICON: &str = "📁";
-const EDIT_ICON: &str = "✎";
-
-struct CardToolbar {
-    file: Option<egui::Rect>,
-    edit: Option<egui::Rect>,
-}
-
-impl CardToolbar {
-    fn layout(card: egui::Rect, show_file: bool, show_edit: bool) -> Self {
-        let cy = card.center().y;
-        let mut x = card.right() - TOOLBAR_MARGIN;
-
-        let edit = if show_edit {
-            x -= ICON_SLOT;
-            let r = egui::Rect::from_center_size(
-                egui::pos2(x + ICON_SLOT / 2.0, cy),
-                egui::vec2(ICON_SLOT, ICON_SLOT),
-            );
-            x -= TOOLBAR_GAP;
-            Some(r)
-        } else {
-            None
-        };
-
-        let file = if show_file {
-            x -= ICON_SLOT;
-            Some(egui::Rect::from_center_size(
-                egui::pos2(x + ICON_SLOT / 2.0, cy),
-                egui::vec2(ICON_SLOT, ICON_SLOT),
-            ))
-        } else {
-            None
-        };
-
-        Self { file, edit }
-    }
-
-    fn reserved_width(show_file: bool, show_edit: bool) -> f32 {
-        let mut w = TOOLBAR_MARGIN;
-        if show_edit {
-            w += ICON_SLOT;
-        }
-        if show_file {
-            if show_edit {
-                w += TOOLBAR_GAP;
-            }
-            w += ICON_SLOT;
-        }
-        w
+        );
     }
 }
 
-fn icon_color(resp: &egui::Response) -> egui::Color32 {
+// ─── Card constants ───────────────────────────────────────────────────────────
+
+const CARD_ICON_FONT: f32 = 22.0;
+
+const FILE_ICON: &str = "\u{1F4C1}";
+const EDIT_ICON: &str = "\u{270E}";
+
+// ─── Icon helpers ─────────────────────────────────────────────────────────────
+
+fn icon_color(ui: &egui::Ui, resp: &egui::Response) -> egui::Color32 {
     if resp.hovered() {
-        egui::Color32::from_rgb(33, 150, 243)
+        ui.visuals().selection.stroke.color
     } else {
-        egui::Color32::GRAY
+        ui.visuals().weak_text_color()
     }
 }
 
@@ -206,7 +211,7 @@ fn paint_icon(ui: &egui::Ui, rect: egui::Rect, icon: &str, color: egui::Color32)
     let galley = ui.fonts_mut(|f| {
         f.layout(
             icon.to_string(),
-            egui::FontId::proportional(ICON_FONT),
+            egui::FontId::proportional(CARD_ICON_FONT),
             color,
             f32::INFINITY,
         )
@@ -224,7 +229,7 @@ fn paint_icon(ui: &egui::Ui, rect: egui::Rect, icon: &str, color: egui::Color32)
 fn paint_edit_icon(ui: &mut egui::Ui, rect: egui::Rect, id: egui::Id) -> egui::Response {
     let resp = ui.interact(rect, id, egui::Sense::click());
     if ui.is_rect_visible(rect) {
-        paint_icon(ui, rect, EDIT_ICON, icon_color(&resp));
+        paint_icon(ui, rect, EDIT_ICON, icon_color(ui, &resp));
     }
     resp
 }
@@ -232,10 +237,12 @@ fn paint_edit_icon(ui: &mut egui::Ui, rect: egui::Rect, id: egui::Id) -> egui::R
 fn paint_file_icon(ui: &mut egui::Ui, rect: egui::Rect, id: egui::Id) -> egui::Response {
     let resp = ui.interact(rect, id, egui::Sense::click());
     if ui.is_rect_visible(rect) {
-        paint_icon(ui, rect, FILE_ICON, icon_color(&resp));
+        paint_icon(ui, rect, FILE_ICON, icon_color(ui, &resp));
     }
     resp
 }
+
+// ─── Card chrome ──────────────────────────────────────────────────────────────
 
 fn paint_card_chrome(
     ui: &egui::Ui,
@@ -243,84 +250,87 @@ fn paint_card_chrome(
     fill: egui::Color32,
     stroke: egui::Stroke,
 ) {
-    let corner = egui::CornerRadius::same(8);
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, corner, fill);
-    painter.rect_stroke(rect, corner, stroke, egui::StrokeKind::Inside);
+    painter.rect_filled(rect, style::CORNER_RADIUS_SM, fill);
+    painter.rect_stroke(rect, style::CORNER_RADIUS_SM, stroke, egui::StrokeKind::Inside);
 }
+
+// ─── Local terminal card ──────────────────────────────────────────────────────
 
 fn render_local_terminal_card(
     ui: &mut egui::Ui,
     selected: bool,
     card_menu: &mut HomeCardMenuAction,
 ) -> (egui::Response, egui::Response) {
-    let desired = egui::vec2(ui.available_width(), CARD_H);
+    // Same style as connection cards — consistency across all cards
+    let desired = egui::vec2(ui.available_width(), style::CARD_HEIGHT);
     let (rect, resp) = ui.allocate_exact_size(desired, egui::Sense::click());
 
     let mut file_resp =
         ui.interact(egui::Rect::NOTHING, ui.id().with("local_file"), egui::Sense::hover());
 
     if ui.is_rect_visible(rect) {
-        let fill = if selected {
-            egui::Color32::from_rgb(28, 58, 32)
-        } else {
-            egui::Color32::from_rgb(20, 40, 20)
-        };
-        let stroke_color = if selected {
-            egui::Color32::from_rgb(72, 200, 90)
-        } else {
-            egui::Color32::from_rgb(40, 167, 69)
-        };
         paint_card_chrome(
             ui,
             rect,
-            fill,
-            egui::Stroke::new(1.5, stroke_color),
+            card_fill(ui, selected, resp.hovered()),
+            card_stroke(ui, selected, resp.hovered()),
         );
 
-        let toolbar = CardToolbar::layout(rect, true, false);
-        let _text_right = rect.right() - CardToolbar::reserved_width(true, false);
+        let icon_x = rect.left() + 16.0;
+        let icon_y = rect.center().y;
 
+        // Icon — use accent color like other cards
         let icon = ui.fonts_mut(|f| {
             f.layout(
                 "\u{1F4BB}".to_string(),
-                egui::FontId::proportional(22.0),
-                egui::Color32::WHITE,
+                egui::FontId::proportional(CARD_ICON_FONT),
+                style::ACCENT,
                 f32::INFINITY,
             )
         });
         ui.painter_at(rect).galley(
-            egui::pos2(rect.left() + 16.0, rect.center().y - icon.rect.height() / 2.0),
+            egui::pos2(icon_x, icon_y - icon.rect.height() / 2.0),
             icon,
-            egui::Color32::WHITE,
+            style::ACCENT,
         );
-        let name = ui.fonts_mut(|f| {
+
+        let text_left = rect.left() + 56.0;
+        let name_top = rect.top() + 14.0;
+        let sub_top = rect.top() + 42.0;
+
+        // Title
+        let name_g = ui.fonts_mut(|f| {
             f.layout(
                 rust_i18n::t!("home_local_terminal").to_string(),
                 egui::FontId::proportional(16.0),
-                egui::Color32::WHITE,
+                ui.visuals().text_color(),
                 f32::INFINITY,
             )
         });
         ui.painter_at(rect).galley(
-            egui::pos2(rect.left() + 56.0, rect.top() + 14.0),
-            name,
-            egui::Color32::WHITE,
+            egui::pos2(text_left, name_top),
+            name_g,
+            ui.visuals().text_color(),
         );
-        let sub = ui.fonts_mut(|f| {
+
+        // Subtitle
+        let sub_g = ui.fonts_mut(|f| {
             f.layout(
                 "Open a local shell session".to_string(),
                 egui::FontId::proportional(13.0),
-                egui::Color32::GRAY,
+                ui.visuals().weak_text_color(),
                 f32::INFINITY,
             )
         });
         ui.painter_at(rect).galley(
-            egui::pos2(rect.left() + 56.0, rect.top() + 40.0),
-            sub,
-            egui::Color32::GRAY,
+            egui::pos2(text_left, sub_top),
+            sub_g,
+            ui.visuals().weak_text_color(),
         );
 
+        // File icon in toolbar area
+        let toolbar = style::CardToolbar::layout(rect, true, false);
         if let Some(file_rect) = toolbar.file {
             file_resp = paint_file_icon(ui, file_rect, ui.id().with("local_builtin_file"));
             if file_resp.clicked() {
@@ -332,6 +342,30 @@ fn render_local_terminal_card(
     (resp, file_resp)
 }
 
+/// Dynamic card background — works in both light and dark themes.
+fn card_fill(ui: &egui::Ui, selected: bool, hovered: bool) -> egui::Color32 {
+    if selected {
+        ui.visuals().selection.bg_fill.gamma_multiply(0.35)
+    } else if hovered {
+        ui.visuals().widgets.hovered.bg_fill
+    } else {
+        ui.visuals().extreme_bg_color
+    }
+}
+
+/// Dynamic card stroke — works in both light and dark themes.
+fn card_stroke(ui: &egui::Ui, selected: bool, hovered: bool) -> egui::Stroke {
+    if selected {
+        egui::Stroke::new(1.5, ui.visuals().selection.stroke.color)
+    } else if hovered {
+        egui::Stroke::new(1.0, ui.visuals().widgets.hovered.bg_stroke.color)
+    } else {
+        ui.visuals().widgets.noninteractive.bg_stroke
+    }
+}
+
+// ─── Connection card ──────────────────────────────────────────────────────────
+
 fn render_connection_card(
     ui: &mut egui::Ui,
     conn: &SavedConnection,
@@ -340,7 +374,7 @@ fn render_connection_card(
     edit_clicked: &mut Option<String>,
 ) -> (egui::Response, egui::Response, egui::Response) {
     let show_file = matches!(conn.conn_type, ConnectionType::Local | ConnectionType::Ssh);
-    let desired = egui::vec2(ui.available_width(), CARD_H);
+    let desired = egui::vec2(ui.available_width(), style::CARD_HEIGHT);
     let (rect, resp) = ui.allocate_exact_size(desired, egui::Sense::click());
 
     let noop = ui.interact(
@@ -352,60 +386,67 @@ fn render_connection_card(
     let mut pencil_resp = noop;
 
     if ui.is_rect_visible(rect) {
-        let fill = if selected {
-            egui::Color32::from_rgb(35, 45, 58)
-        } else {
-            ui.style().visuals.extreme_bg_color
-        };
-        let stroke = if selected {
-            egui::Stroke::new(1.5, egui::Color32::from_rgb(33, 150, 243))
-        } else {
-            egui::Stroke::new(1.0, ui.style().visuals.widgets.inactive.bg_fill)
-        };
-        paint_card_chrome(ui, rect, fill, stroke);
+        paint_card_chrome(
+            ui,
+            rect,
+            card_fill(ui, selected, resp.hovered()),
+            card_stroke(ui, selected, resp.hovered()),
+        );
 
-        let toolbar = CardToolbar::layout(rect, show_file, true);
-        let _text_right = rect.right() - CardToolbar::reserved_width(show_file, true);
+        let icon_x = rect.left() + 16.0;
+        let icon_y = rect.center().y;
 
+        // Connection type icon
         let icon = ui.fonts_mut(|f| {
             f.layout(
                 conn.conn_type.icon().to_string(),
-                egui::FontId::proportional(22.0),
-                egui::Color32::WHITE,
+                egui::FontId::proportional(CARD_ICON_FONT),
+                style::ACCENT,
                 f32::INFINITY,
             )
         });
         ui.painter_at(rect).galley(
-            egui::pos2(rect.left() + 16.0, rect.center().y - icon.rect.height() / 2.0),
+            egui::pos2(icon_x, icon_y - icon.rect.height() / 2.0),
             icon,
-            egui::Color32::WHITE,
+            style::ACCENT,
         );
-        let name = ui.fonts_mut(|f| {
+
+        let text_left = rect.left() + 56.0;
+        let name_top = rect.top() + 14.0;
+        let sub_top = rect.top() + 42.0;
+
+        // Name
+        let name_g = ui.fonts_mut(|f| {
             f.layout(
                 conn.name.clone(),
                 egui::FontId::proportional(15.0),
-                ui.style().visuals.text_color(),
+                ui.visuals().text_color(),
                 f32::INFINITY,
             )
         });
         ui.painter_at(rect).galley(
-            egui::pos2(rect.left() + 56.0, rect.top() + 14.0),
-            name,
-            ui.style().visuals.text_color(),
+            egui::pos2(text_left, name_top),
+            name_g,
+            ui.visuals().text_color(),
         );
-        let sub = ui.fonts_mut(|f| {
+
+        // Type label
+        let sub_g = ui.fonts_mut(|f| {
             f.layout(
                 conn.conn_type.label().to_string(),
                 egui::FontId::proportional(13.0),
-                egui::Color32::GRAY,
+                ui.visuals().weak_text_color(),
                 f32::INFINITY,
             )
         });
         ui.painter_at(rect).galley(
-            egui::pos2(rect.left() + 56.0, rect.top() + 40.0),
-            sub,
-            egui::Color32::GRAY,
+            egui::pos2(text_left, sub_top),
+            sub_g,
+            ui.visuals().weak_text_color(),
         );
+
+        // Toolbar icons
+        let toolbar = style::CardToolbar::layout(rect, show_file, true);
 
         if let Some(edit_rect) = toolbar.edit {
             pencil_resp = paint_edit_icon(ui, edit_rect, ui.id().with(("edit", &conn.id)));

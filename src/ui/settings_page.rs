@@ -3,6 +3,7 @@ use crate::fonts;
 use crate::i18n::Language;
 use crate::settings::{AppSettings, Profile};
 use crate::ui::keyboard::KeyboardMode;
+use crate::ui::style;
 
 // ─── Tab identifiers ──────────────────────────────────────────────────────────
 
@@ -44,11 +45,18 @@ impl SettingsTab {
 pub fn settings_page(ui: &mut egui::Ui, settings: &mut AppSettings) -> bool {
     let mut close = false;
     ui.horizontal(|ui| {
-        if ui.button(rust_i18n::t!("back")).clicked() {
+        let back_btn = egui::Button::new(
+            egui::RichText::new("\u{2190}  ".to_string() + &rust_i18n::t!("back"))
+                .size(14.0)
+                .color(ui.visuals().text_color()),
+        )
+        .frame(false)
+        .corner_radius(style::CORNER_RADIUS_XS);
+        if ui.add(back_btn).clicked() {
             close = true;
         }
     });
-    ui.add_space(4.0);
+    ui.add_space(8.0);
     settings_scroll_body(ui, settings, SettingsLayout::Home);
     close
 }
@@ -57,10 +65,19 @@ pub fn settings_page(ui: &mut egui::Ui, settings: &mut AppSettings) -> bool {
 pub fn settings_side_panel(ui: &mut egui::Ui, settings: &mut AppSettings) -> bool {
     let mut close = false;
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(rust_i18n::t!("settings")).size(16.0).strong());
+        ui.label(
+            egui::RichText::new(rust_i18n::t!("settings"))
+                .size(17.0)
+                .strong()
+                .color(ui.visuals().text_color()),
+        );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui
-                .add(egui::Button::new("\u{2715}").small())
+            let close_btn = egui::Button::new(
+                egui::RichText::new("\u{2715}").size(14.0).color(ui.visuals().weak_text_color()),
+            )
+            .frame(false)
+            .corner_radius(style::CORNER_RADIUS_XS);
+            if ui.add(close_btn)
                 .on_hover_text(rust_i18n::t!("close"))
                 .clicked()
             {
@@ -68,14 +85,15 @@ pub fn settings_side_panel(ui: &mut egui::Ui, settings: &mut AppSettings) -> boo
             }
         });
     });
+    ui.add_space(2.0);
     ui.label(
         egui::RichText::new(rust_i18n::t!("settings_terminal_running_hint"))
             .size(11.0)
-            .color(egui::Color32::GRAY),
+            .color(ui.visuals().weak_text_color()),
     );
-    ui.add_space(6.0);
+    ui.add_space(8.0);
     ui.separator();
-    ui.add_space(4.0);
+    ui.add_space(6.0);
     settings_scroll_body(ui, settings, SettingsLayout::Workspace);
     close
 }
@@ -125,11 +143,28 @@ fn paint_tab_buttons(ui: &mut egui::Ui, state: &mut TabState) {
     for tab in SettingsTab::ALL {
         let label = tab.label();
         let selected = state.active_tab == tab;
-        let mut btn = egui::Button::new(egui::RichText::new(&label).size(13.0));
+        let text_color = if selected { ui.visuals().selection.stroke.color } else { ui.visuals().weak_text_color() };
+
+        let btn = egui::Button::new(
+            egui::RichText::new(&label).size(13.0).color(text_color).strong(),
+        )
+        .fill(egui::Color32::TRANSPARENT)
+        .corner_radius(style::CORNER_RADIUS_SM)
+        .min_size(egui::vec2(0.0, 30.0));
+
+        let resp = ui.add(btn);
         if selected {
-            btn = btn.fill(ui.visuals().selection.bg_fill);
+            // Draw a small indicator line under the selected tab
+            let painter = ui.painter();
+            let line_y = resp.rect.bottom();
+            let line_x = resp.rect.left() + 4.0;
+            let line_w = resp.rect.width() - 8.0;
+            painter.line_segment(
+                [egui::pos2(line_x, line_y), egui::pos2(line_x + line_w, line_y)],
+                egui::Stroke::new(2.0, ui.visuals().selection.stroke.color),
+            );
         }
-        if ui.add(btn).clicked() {
+        if resp.clicked() {
             state.active_tab = tab;
         }
     }
@@ -345,21 +380,31 @@ fn section_shell(ui: &mut egui::Ui, title: &str, subtitle: &str, add_body: impl 
             egui::Frame::new()
                 .fill(ui.visuals().extreme_bg_color)
                 .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
-                .corner_radius(egui::CornerRadius::same(8))
-                .inner_margin(egui::Margin::symmetric(12, 10))
+                .corner_radius(style::CORNER_RADIUS_SM)
+                .inner_margin(egui::Margin::symmetric(16, 14))
                 .show(ui, |ui| {
                     fill_page_width(ui);
-                    ui.label(egui::RichText::new(title).size(14.0).strong());
+                    ui.label(
+                        egui::RichText::new(title)
+                            .size(15.0)
+                            .strong()
+                            .color(ui.visuals().text_color()),
+                    );
                     if !subtitle.is_empty() {
-                        ui.label(egui::RichText::new(subtitle).size(11.0).weak());
-                        ui.add_space(6.0);
-                    } else {
+                        ui.add_space(2.0);
+                        ui.label(
+                            egui::RichText::new(subtitle)
+                                .size(11.0)
+                                .color(ui.visuals().weak_text_color()),
+                        );
                         ui.add_space(8.0);
+                    } else {
+                        ui.add_space(10.0);
                     }
                     fill_page_width(ui);
                     add_body(ui);
                 });
-            ui.add_space(10.0);
+            ui.add_space(12.0);
         },
     );
 }
@@ -665,31 +710,46 @@ fn profile_selector(
         egui::Frame::new()
             .fill(bg)
             .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
-            .corner_radius(6)
-            .inner_margin(egui::Margin::symmetric(8, 6))
+            .corner_radius(style::CORNER_RADIUS_XS)
+            .inner_margin(egui::Margin::symmetric(10, 8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let label = if is_default {
-                        format!("● {name}")
+                        format!("\u{25CF} {name}")
                     } else {
                         name.clone()
                     };
+                    let text_color = if is_selected {
+                        ui.visuals().selection.stroke.color
+                    } else {
+                        ui.visuals().text_color()
+                    };
                     if ui
-                        .selectable_label(is_selected, SettingsFormLayout::form_label(&label))
+                        .selectable_label(is_selected, egui::RichText::new(&label).size(13.0).color(text_color))
                         .clicked()
                     {
                         state.selected_profile = i;
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if !is_default && settings.profiles.len() > 1 {
-                            if ui.small_button("\u{2715}").on_hover_text(rust_i18n::t!("delete")).clicked() {
+                            let del_btn = egui::Button::new(
+                                egui::RichText::new("\u{2715}").size(11.0).color(ui.visuals().weak_text_color()),
+                            )
+                            .frame(false)
+                            .corner_radius(style::CORNER_RADIUS_XS);
+                            if ui.add(del_btn).on_hover_text(rust_i18n::t!("delete")).clicked() {
                                 to_delete = Some(i);
                             }
                         }
-                        if !is_default
-                            && ui.small_button("★").on_hover_text(rust_i18n::t!("settings_set_default")).clicked()
-                        {
-                            settings.default_profile_name = name.clone();
+                        if !is_default {
+                            let def_btn = egui::Button::new(
+                                egui::RichText::new("\u{2605}").size(12.0).color(ui.visuals().weak_text_color()),
+                            )
+                            .frame(false)
+                            .corner_radius(style::CORNER_RADIUS_XS);
+                            if ui.add(def_btn).on_hover_text(rust_i18n::t!("settings_set_default")).clicked() {
+                                settings.default_profile_name = name.clone();
+                            }
                         }
                     });
                 });

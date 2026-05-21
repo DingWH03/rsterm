@@ -1,5 +1,7 @@
 //! Responsive sidebar: home is pinned when wide; workspace toggles when wide; overlay when narrow.
 
+use crate::ui::style;
+
 pub const WIDE_THRESHOLD: f32 = 720.0;
 pub const DOCK_WIDTH: f32 = 200.0;
 pub const OVERLAY_WIDTH: f32 = 260.0;
@@ -81,7 +83,11 @@ impl Sidebar {
     }
 
     pub fn hamburger(&mut self, ui: &mut egui::Ui) -> egui::Response {
-        ui.button(egui::RichText::new("\u{2630}").size(18.0))
+        ui.add(
+            egui::Button::new(egui::RichText::new("\u{2630}").size(18.0).color(style::TEXT_SECONDARY))
+                .frame(false)
+                .corner_radius(style::CORNER_RADIUS_XS),
+        )
     }
 
     /// Dimmed backdrop; returns `true` if the user tapped outside the panel.

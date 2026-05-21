@@ -1,10 +1,11 @@
 use crate::session::WorkspaceSession;
 use crate::ui::sidebar::Sidebar;
 use crate::ui::sidebar::SidebarPage;
+use crate::ui::style;
 
 /// Reserved width for action buttons on the right of each row.
-const SESSION_ACTIONS_WIDTH: f32 = 56.0;
-const SESSION_ROW_H: f32 = 24.0;
+const SESSION_ACTIONS_WIDTH: f32 = 52.0;
+const SESSION_ROW_H: f32 = 28.0;
 /// New window (duplicate session).
 const ICON_NEW_WINDOW: &str = "\u{29C9}";
 
@@ -24,7 +25,12 @@ pub fn sidebar_brand_row(
         if show_hamburger && sidebar.hamburger(ui).clicked() {
             sidebar.hamburger_click(page);
         }
-        ui.label(egui::RichText::new("rsTerm").strong().size(15.0));
+        ui.label(
+            egui::RichText::new("rsTerm")
+                .size(17.0)
+                .strong()
+                .color(ui.visuals().text_color()),
+        );
     });
 }
 
@@ -39,18 +45,25 @@ pub fn sidebar_sessions_panel(
         new_window_session: None,
     };
 
-    ui.label(egui::RichText::new(rust_i18n::t!("sidebar_sessions")).size(12.0).weak());
     ui.add_space(2.0);
+    ui.label(
+        egui::RichText::new(rust_i18n::t!("sidebar_sessions"))
+            .size(11.0)
+            .color(ui.visuals().weak_text_color())
+            .strong(),
+    );
+    ui.add_space(4.0);
 
     egui::ScrollArea::vertical()
         .id_salt("sidebar_sessions_scroll")
         .auto_shrink([false; 2])
         .show(ui, |ui| {
             if sessions.is_empty() {
+                ui.add_space(8.0);
                 ui.label(
                     egui::RichText::new(rust_i18n::t!("sidebar_no_sessions"))
                         .size(12.0)
-                        .color(egui::Color32::GRAY),
+                        .color(ui.visuals().weak_text_color()),
                 );
                 return;
             }
@@ -97,25 +110,30 @@ fn paint_session_row(
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.set_width(actions_w);
-            if ui
-                .small_button("\u{2715}")
+            let weak_color = ui.visuals().weak_text_color();
+            let close_btn = egui::Button::new(
+                egui::RichText::new("\u{2715}").size(11.0).color(weak_color),
+            )
+            .frame(false)
+            .corner_radius(style::CORNER_RADIUS_XS);
+            if ui.add(close_btn)
                 .on_hover_text(rust_i18n::t!("close"))
                 .clicked()
             {
                 action.close_session = Some(session.id().to_string());
             }
-            if show_new
-                && ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new(ICON_NEW_WINDOW).size(15.0).strong(),
-                        )
-                        .small(),
-                    )
+            if show_new {
+                let new_btn = egui::Button::new(
+                    egui::RichText::new(ICON_NEW_WINDOW).size(13.0).color(weak_color),
+                )
+                .frame(false)
+                .corner_radius(style::CORNER_RADIUS_XS);
+                if ui.add(new_btn)
                     .on_hover_text(rust_i18n::t!("new_window"))
                     .clicked()
-            {
-                action.new_window_session = Some(session.id().to_string());
+                {
+                    action.new_window_session = Some(session.id().to_string());
+                }
             }
         });
     });
@@ -135,10 +153,9 @@ fn paint_session_label(
     } else {
         ui.visuals().text_color()
     };
-    let sel_fill = ui.visuals().selection.bg_fill;
-    let sel_radius = ui.visuals().widgets.active.corner_radius;
+    let sel_fill = ui.visuals().selection.bg_fill.gamma_multiply(0.4);
     let hover_fill = ui.visuals().widgets.hovered.bg_fill;
-    let hover_radius = ui.visuals().widgets.hovered.corner_radius;
+    let corner = style::CORNER_RADIUS_XS;
 
     let galley = ui.fonts_mut(|f| {
         f.layout(
@@ -153,9 +170,9 @@ fn paint_session_label(
         ui.allocate_exact_size(egui::vec2(width, SESSION_ROW_H), egui::Sense::click());
 
     if active {
-        ui.painter().rect_filled(rect, sel_radius, sel_fill);
+        ui.painter().rect_filled(rect, corner, sel_fill);
     } else if response.hovered() {
-        ui.painter().rect_filled(rect, hover_radius, hover_fill);
+        ui.painter().rect_filled(rect, corner, hover_fill);
     }
 
     let clip = rect.shrink2(egui::vec2(4.0, 0.0));

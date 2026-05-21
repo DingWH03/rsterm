@@ -80,7 +80,7 @@ impl UiTheme {
 
     /// Apply this theme to the egui context.
     pub fn apply(self, ctx: &egui::Context) {
-        let theme = match self {
+        let mut theme = match self {
             Self::System => {
                 let dark = std::env::var("COLORFGBG")
                     .ok()
@@ -95,6 +95,52 @@ impl UiTheme {
             Self::Light => egui::Visuals::light(),
             Self::Dark => egui::Visuals::dark(),
         };
+
+        // ── Modern dark-theme refinements ────────────────────────────────────
+        // Only customise when the user is on a dark theme (light theme is fine as-is).
+        if theme.dark_mode {
+            use crate::ui::style;
+
+            // Window / panel backgrounds
+            theme.window_fill = style::SURFACE_0;
+            theme.panel_fill = style::SURFACE_1;
+
+            // Widget styling
+            theme.widgets.noninteractive.bg_fill = style::SURFACE_2;
+            theme.widgets.noninteractive.weak_bg_fill = style::SURFACE_1;
+            theme.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, style::BORDER_SUBTLE);
+            theme.widgets.noninteractive.corner_radius = style::CORNER_RADIUS_XS;
+
+            theme.widgets.inactive.bg_fill = style::SURFACE_2;
+            theme.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, style::TEXT_PRIMARY);
+            theme.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, style::BORDER_SUBTLE);
+            theme.widgets.inactive.corner_radius = style::CORNER_RADIUS_XS;
+
+            theme.widgets.hovered.bg_fill = style::SURFACE_3;
+            theme.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, style::BORDER);
+            theme.widgets.hovered.corner_radius = style::CORNER_RADIUS_XS;
+
+            theme.widgets.active.bg_fill = style::SURFACE_4;
+            theme.widgets.active.bg_stroke = egui::Stroke::new(1.0, style::BORDER_ACCENT);
+            theme.widgets.active.corner_radius = style::CORNER_RADIUS_XS;
+
+            theme.widgets.open.bg_fill = style::SURFACE_4;
+
+            // Selection
+            theme.selection.bg_fill = style::ACCENT_BG;
+            theme.selection.stroke = egui::Stroke::new(1.0, style::ACCENT);
+
+            // Hyperlink
+            theme.hyperlink_color = style::ACCENT;
+
+            // Text
+            theme.override_text_color = Some(style::TEXT_PRIMARY);
+
+            // Window rounding
+            theme.window_corner_radius = style::CORNER_RADIUS_SM;
+            theme.window_stroke = egui::Stroke::new(1.0, style::BORDER_SUBTLE);
+        }
+
         ctx.set_visuals(theme);
     }
 }
