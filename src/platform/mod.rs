@@ -1,11 +1,11 @@
 //! Cross-platform helpers (Linux, macOS, Windows, Android).
 
 #[cfg(target_os = "android")]
+mod android_btleplug;
+#[cfg(target_os = "android")]
 mod android_ime;
 #[cfg(target_os = "android")]
 mod android_storage;
-#[cfg(target_os = "android")]
-mod android_btleplug;
 
 mod ble;
 mod process;
@@ -13,13 +13,17 @@ mod serial;
 mod shell;
 
 #[cfg(target_os = "android")]
+pub use android_btleplug::{
+    cache_class_loader_from_activity as cache_android_class_loader,
+    ensure_initialized as ensure_android_btleplug_initialized,
+    init_from_android_app as init_android_btleplug,
+};
+#[cfg(target_os = "android")]
 pub use android_ime::{bottom_inset_points, init as init_android_ime, top_inset_points};
 #[cfg(target_os = "android")]
 pub use android_storage::{
     ensure_bluetooth_access, ensure_storage_access, has_bluetooth_access, request_bluetooth_access,
 };
-#[cfg(target_os = "android")]
-pub use android_btleplug::{ensure_btleplug_initialized, init_btleplug};
 
 pub use process::{
     foreground_command, foreground_process_pid, local_user_at_host, ssh_user_at_host,

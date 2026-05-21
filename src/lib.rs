@@ -74,9 +74,14 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
     platform::ensure_bluetooth_access(&app);
 
     // Initialise btleplug (Droidplug) for BLE scanning/connection.
-    // Android BLE work later runs on spawned Rust threads, so the platform
-    // helper stores the JavaVM and can lazily re-run init from those threads.
-    platform::init_btleplug(&app);
+    // Android NativeActivity threads are not guaranteed to already have a JNIEnv,
+    // so the helper attaches the current thread when needed.
+    //
+    // IMPORTANT: cache the app ClassLoader from the Activity *before* any
+    // FindClass call, because NativeActivity's main thread may not have the
+    // app's class loader either.
+    platform::cache_android_class_loader(&app);
+    platform::init_android_btleplug(app.vm_as_ptr());
 
     // -- Initialise persistent config path ------------------------------
     // Android NativeActivity does NOT set $HOME / $XDG_CONFIG_HOME, so

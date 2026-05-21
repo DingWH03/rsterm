@@ -406,7 +406,9 @@ impl NewConnectionDialog {
     }
 
     fn start_ble_scan(&mut self, ctx: &egui::Context) {
+        log::info!("start_ble_scan called");
         if self.ble_scanning {
+            log::info!("start_ble_scan: already scanning, skipping");
             return;
         }
 
@@ -414,6 +416,7 @@ impl NewConnectionDialog {
 
         #[cfg(target_os = "android")]
         {
+            log::info!("start_ble_scan: checking bluetooth permission");
             if !crate::platform::has_bluetooth_access() {
                 crate::platform::request_bluetooth_access();
                 self.ble_scan_error = Some(
@@ -430,11 +433,18 @@ impl NewConnectionDialog {
         self.ble_scanning = true;
         let ctx = ctx.clone();
         std::thread::spawn(move || {
+            log::info!("BLE scan thread: starting");
             let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 scan_ble_devices_blocking()
             })) {
-                Ok(Ok(devices)) => Ok(devices),
-                Ok(Err(e)) => Err(e),
+                Ok(Ok(devices)) => {
+                    log::info!("BLE scan thread: success ({} devices)", devices.len());
+                    Ok(devices)
+                }
+                Ok(Err(e)) => {
+                    log::error!("BLE scan thread: error: {e}");
+                    Err(e)
+                }
                 Err(panic) => {
                     let msg = if let Some(s) = panic.downcast_ref::<&str>() {
                         s.to_string()
@@ -443,6 +453,7 @@ impl NewConnectionDialog {
                     } else {
                         "未知错误".to_string()
                     };
+                    log::error!("BLE scan thread: panicked: {msg}");
                     Err(format!("BLE 扫描异常：{msg}"))
                 }
             };

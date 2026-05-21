@@ -3,24 +3,51 @@
 use std::time::Duration;
 
 pub fn scan_ble_devices_blocking() -> Result<Vec<String>, String> {
+    log::info!("BLE scan: starting");
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            log::error!("BLE scan: failed to create tokio runtime: {e}");
+            e.to_string()
+        })?;
 
-    rt.block_on(async { scan_ble_async().await })
+    let result = rt.block_on(async { scan_ble_async().await });
+    match &result {
+        Ok(devices) => log::info!("BLE scan: completed, {} device(s)", devices.len()),
+        Err(e) => log::error!("BLE scan: failed: {e}"),
+    }
+    result
 }
 
 async fn scan_ble_async() -> Result<Vec<String>, String> {
     #[cfg(target_os = "android")]
-    crate::platform::ensure_btleplug_initialized()?;
+    {
+        log::info!("BLE scan: initializing btleplug Android backend");
+        if let Err(e) = crate::platform::ensure_android_btleplug_initialized() {
+            log::error!("BLE scan: btleplug init failed: {e}");
+            return Err(e);
+        }
+        log::info!("BLE scan: btleplug initialized OK");
+    }
 
     use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
     use btleplug::platform::Manager;
 
-    let manager = Manager::new().await.map_err(|e| e.to_string())?;
-    let adapters = manager.adapters().await.map_err(|e| e.to_string())?;
-    let adapter = adapters.first().ok_or_else(no_adapter_error)?;
+    log::info!("BLE scan: creating Manager");
+    let manager = Manager::new().await.map_err(|e| {
+        log::error!("BLE scan: Manager::new failed: {e}");
+        e.to_string()
+    })?;
+    log::info!("BLE scan: getting adapters");
+    let adapters = manager.adapters().await.map_err(|e| {
+        log::error!("BLE scan: manager.adapters failed: {e}");
+        e.to_string()
+    })?;
+    let adapter = adapters.first().ok_or_else(|| {
+        log::error!("BLE scan: no adapter found");
+        no_adapter_error()
+    })?;
 
     adapter
         .start_scan(ScanFilter::default())

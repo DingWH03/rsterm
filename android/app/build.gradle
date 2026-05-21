@@ -38,6 +38,11 @@ android {
         versionName rstermVersionName
     }
 
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
     signingConfigs {
         release {
             if (releaseKeystore != null && releaseKeystore.exists()) {
@@ -52,6 +57,7 @@ android {
     buildTypes {
         release {
             minifyEnabled false
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
             if (releaseKeystore != null && releaseKeystore.exists()) {
                 signingConfig signingConfigs.release
             }
@@ -72,6 +78,7 @@ android {
 
     sourceSets {
         main {
+            java.srcDirs = ["src/main/java"]
             jniLibs.srcDirs = ["src/main/jniLibs"]
         }
     }

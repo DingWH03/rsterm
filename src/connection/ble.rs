@@ -534,18 +534,18 @@ pub fn connect_ble(config: &SavedConnection) -> Result<ConnectionHandle, String>
     let repaint_reader = repaint.clone();
 
     let reader_thread = std::thread::spawn(move || {
-        #[cfg(target_os = "android")]
-        if let Err(e) = crate::platform::ensure_btleplug_initialized() {
-            let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(e)));
-            return;
-        }
-
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("Failed to build tokio runtime");
 
         rt.block_on(async move {
+            #[cfg(target_os = "android")]
+            if let Err(e) = crate::platform::ensure_android_btleplug_initialized() {
+                let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(e)));
+                return;
+            }
+
             let manager = match Manager::new().await {
                 Ok(m) => m,
                 Err(e) => {
