@@ -440,7 +440,12 @@ pub fn connection_view(
                 session.scroll_offset = 0;
             }
 
-            let sb_lines = screen.scrollback_lines();
+            let max_scroll_offset = if in_alt {
+                0
+            } else {
+                screen.max_scroll_offset(grid_rows)
+            };
+            session.scroll_offset = session.scroll_offset.min(max_scroll_offset);
             let mouse_to_pty = screen.mouse_tracking_active() && !modifiers.shift;
             let mut wheel_input: Vec<Vec<u8>> = Vec::new();
             process_terminal_wheel(
@@ -452,7 +457,7 @@ pub fn connection_view(
                 grid_cols,
                 screen,
                 in_alt,
-                sb_lines,
+                max_scroll_offset,
                 &mut session.scroll_offset,
                 &mut wheel_input,
             );
@@ -504,45 +509,38 @@ pub fn connection_view(
                 );
             };
 
-            if in_alt {
-                let rows = grid_rows.min(screen.rows);
-                for row in 0..rows {
-                    paint_screen_row(row, &screen.cells[row]);
-                }
+            let virtual_start = if in_alt {
+                0
             } else {
-                for row in 0..grid_rows {
-                    if row < offset {
-                        let line_index = offset - 1 - row;
-                        if let Some(cells) = screen.scrollback_row(line_index) {
-                            paint_screen_row(row, cells);
-                        }
-                    } else {
-                        let screen_row = row - offset;
-                        if screen_row < screen.rows {
-                            paint_screen_row(row, &screen.cells[screen_row]);
-                        }
-                    }
+                screen.viewport_virtual_start(grid_rows, offset)
+            };
+
+            for row in 0..grid_rows {
+                let virtual_line = if in_alt { row } else { virtual_start + row };
+                if let Some(cells) = screen.line_at_virtual(virtual_line) {
+                    paint_screen_row(row, cells);
                 }
             }
 
-            // Cursor (only at bottom)
-            if offset == 0
-                && screen.cursor_visible
-                && screen.cursor_y < grid_rows
-                && screen.cursor_x < grid_cols
-            {
-                // Schedule repaint for cursor blink.
-                ctx.request_repaint_after(std::time::Duration::from_millis(530));
-                paint_cursor(
-                    &painter,
-                    screen,
-                    theme,
-                    grid_rect,
-                    cell_w,
-                    cell_h,
-                    cursor_style,
-                    Some(std::time::Instant::now()),
-                );
+            // Cursor is painted only on the live tail.  Its screen row may differ
+            // from screen.cursor_y when the live viewport pulls scrollback rows into
+            // view above a shorter active grid after resize growth.
+            if let Some(cursor_viewport_row) = screen.cursor_viewport_row(grid_rows, offset) {
+                if screen.cursor_visible && screen.cursor_x < grid_cols {
+                    // Schedule repaint for cursor blink.
+                    ctx.request_repaint_after(std::time::Duration::from_millis(530));
+                    paint_cursor(
+                        &painter,
+                        screen,
+                        theme,
+                        grid_rect,
+                        cell_w,
+                        cell_h,
+                        cursor_style,
+                        Some(std::time::Instant::now()),
+                        Some(cursor_viewport_row),
+                    );
+                }
             }
 
             // Selection highlight
@@ -590,10 +588,10 @@ pub fn connection_view(
             }
 
             // Scrollbar (thumb at bottom when viewing the live tail / offset == 0)
-            if sb_lines > 0 && !in_alt {
-                let sb_total = sb_lines + screen.rows;
-                let sb_pos = 1.0 - (offset as f32 / sb_total as f32);
-                let sb_visible = grid_rows as f32 / sb_total as f32;
+            if max_scroll_offset > 0 && !in_alt {
+                let total_rows = max_scroll_offset + grid_rows;
+                let sb_pos = 1.0 - (offset as f32 / total_rows as f32);
+                let sb_visible = grid_rows as f32 / total_rows as f32;
                 let bar_x = grid_rect.right() - 6.0;
                 let bar_h = (grid_size.y * sb_visible).max(8.0);
                 let bar_y = grid_rect.top() + grid_size.y * (sb_pos - sb_visible).max(0.0);

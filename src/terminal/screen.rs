@@ -10,6 +10,40 @@ const TAB_STOPS_EVERY: usize = 8;
 /// Max scrollback lines (configurable per screen)
 const MAX_SCROLLBACK: usize = 100_000;
 
+/// A logical character stored in the scrollback (without screen layout info).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LogicalCell {
+    pub ch: char,
+    pub fg: Color,
+    pub bg: Color,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub blink: bool,
+    pub reverse: bool,
+    pub dim: bool,
+    pub strikethrough: bool,
+    /// Display width (1 or 2 columns)
+    pub width: usize,
+}
+
+/// A logical line stored in the scrollback buffer (application-output logical line).
+/// This represents one logical output line (e.g. one echo/ls output),
+/// which may be wider than the terminal and will be wrapped to visual rows during rendering.
+#[derive(Debug, Clone)]
+pub(crate) struct LogicalLine {
+    pub cells: Vec<LogicalCell>,
+}
+
+/// One visual row produced by laying out a logical line at a given width.
+/// `start..end` is the range of LogicalCell entries represented by this row.
+#[derive(Debug, Clone)]
+struct VisualSegment {
+    row: Vec<Cell>,
+    start: usize,
+    end: usize,
+    wrapped: bool,
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cell {
     pub ch: char,
@@ -67,6 +101,294 @@ pub fn cell_display_width(cells: &[Cell], col: usize) -> usize {
     1
 }
 
+/// Number of cells in a row, counting wide characters as 1 (i.e. the logical
+/// length ignoring continuation slots).
+#[allow(dead_code)]
+pub(crate) fn count_cells_in_row(cells: &[Cell]) -> usize {
+    cells.iter().filter(|c| !c.wide_continuation).count()
+}
+
+/// Visible content length of a terminal row.  This deliberately drops trailing
+/// blank padding cells that exist only because terminal rows are fixed-width.
+/// Keeping those cells during resize reflow makes short prompt/history lines
+/// wrap into artificial blank continuation rows.
+#[allow(dead_code)]
+pub(crate) fn trimmed_row_len(cells: &[Cell]) -> usize {
+    let mut end = cells.len();
+    while end > 0 {
+        let c = cells[end - 1];
+        if c.ch == ' ' && !c.wide_continuation {
+            end -= 1;
+        } else {
+            break;
+        }
+    }
+    end
+}
+
+/// Convert a physical screen row (with wide_continuation) to logical cells.
+/// Trailing spaces are stripped; wide_continuation slots are skipped.
+pub(crate) fn row_to_logical_cells(row: &[Cell]) -> Vec<LogicalCell> {
+    row_to_logical_cells_with_trim(row, true)
+}
+
+/// Convert a physical row to logical cells, optionally preserving trailing spaces.
+///
+/// This is important for resize reflow: if the next physical row is marked as a
+/// soft-wrap continuation, spaces at the end of the current physical row are not
+/// padding; they are part of the logical line and must be preserved.  Dropping
+/// them is what makes columnar output collapse into strings like
+/// `common_config_content.jsonkey` or `Pictures视频` after repeated resizes.
+fn row_to_logical_cells_with_trim(row: &[Cell], trim_trailing_spaces: bool) -> Vec<LogicalCell> {
+    let mut out = Vec::new();
+
+    let mut end = row.len();
+    if trim_trailing_spaces {
+        while end > 0 {
+            let c = row[end - 1];
+            if c.ch == ' ' && !c.wide_continuation {
+                end -= 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    // Do not leave a dangling wide-character leader at the logical boundary.
+    if end < row.len() && end > 0 && row[end].wide_continuation {
+        end -= 1;
+    }
+
+    let mut x = 0;
+    while x < end {
+        let c = row[x];
+
+        // Skip continuation slots.
+        if c.wide_continuation {
+            x += 1;
+            continue;
+        }
+
+        let width = if x + 1 < end && row[x + 1].wide_continuation {
+            2
+        } else {
+            1
+        };
+
+        out.push(LogicalCell {
+            ch: c.ch,
+            fg: c.fg,
+            bg: c.bg,
+            bold: c.bold,
+            italic: c.italic,
+            underline: c.underline,
+            blink: c.blink,
+            reverse: c.reverse,
+            dim: c.dim,
+            strikethrough: c.strikethrough,
+            width,
+        });
+
+        x += width;
+    }
+
+    out
+}
+
+/// Layout a logical line into visual screen rows for the given terminal width.
+/// This handles character wrapping and adds wide_continuation markers.
+pub(crate) fn layout_logical_line(line: &LogicalLine, cols: usize) -> Vec<Vec<Cell>> {
+    if cols == 0 {
+        return vec![vec![]];
+    }
+
+    let mut rows: Vec<Vec<Cell>> = Vec::new();
+    let mut row = vec![Cell::default(); cols];
+    let mut x = 0usize;
+
+    for lc in &line.cells {
+        if lc.width == 0 {
+            continue;
+        }
+
+        // Need to wrap?
+        if x + lc.width > cols {
+            rows.push(row);
+            row = vec![Cell::default(); cols];
+            x = 0;
+        }
+
+        // Safety: if width > cols, push a row and start fresh.
+        if x >= cols {
+            rows.push(row);
+            row = vec![Cell::default(); cols];
+            x = 0;
+        }
+
+        let cell = Cell {
+            ch: lc.ch,
+            fg: lc.fg,
+            bg: lc.bg,
+            bold: lc.bold,
+            italic: lc.italic,
+            underline: lc.underline,
+            blink: lc.blink,
+            reverse: lc.reverse,
+            dim: lc.dim,
+            strikethrough: lc.strikethrough,
+            wide_continuation: false,
+        };
+
+        row[x] = cell;
+
+        if lc.width == 2 && x + 1 < cols {
+            row[x + 1] = Cell {
+                ch: ' ',
+                fg: lc.fg,
+                bg: lc.bg,
+                bold: lc.bold,
+                italic: lc.italic,
+                underline: lc.underline,
+                blink: lc.blink,
+                reverse: lc.reverse,
+                dim: lc.dim,
+                strikethrough: lc.strikethrough,
+                wide_continuation: true,
+            };
+        }
+
+        x += lc.width;
+    }
+
+    rows.push(row);
+    rows
+}
+
+/// Layout a logical line into visual rows, keeping enough metadata to split the
+/// current visible grid during resize without losing data.
+fn layout_logical_line_segments(
+    line: &LogicalLine,
+    cols: usize,
+    first_row_is_wrapped: bool,
+) -> Vec<VisualSegment> {
+    if cols == 0 {
+        return vec![VisualSegment {
+            row: Vec::new(),
+            start: 0,
+            end: 0,
+            wrapped: first_row_is_wrapped,
+        }];
+    }
+
+    if line.cells.is_empty() {
+        return vec![VisualSegment {
+            row: vec![Cell::default(); cols],
+            start: 0,
+            end: 0,
+            wrapped: first_row_is_wrapped,
+        }];
+    }
+
+    let mut rows: Vec<VisualSegment> = Vec::new();
+    let mut row = vec![Cell::default(); cols];
+    let mut x = 0usize;
+    let mut start = 0usize;
+    let mut first = true;
+
+    for (i, lc) in line.cells.iter().enumerate() {
+        if lc.width == 0 {
+            continue;
+        }
+
+        let width = lc.width.max(1);
+        if x > 0 && x + width > cols {
+            rows.push(VisualSegment {
+                row,
+                start,
+                end: i,
+                wrapped: if first { first_row_is_wrapped } else { true },
+            });
+            row = vec![Cell::default(); cols];
+            x = 0;
+            start = i;
+            first = false;
+        }
+
+        let cell = Cell {
+            ch: lc.ch,
+            fg: lc.fg,
+            bg: lc.bg,
+            bold: lc.bold,
+            italic: lc.italic,
+            underline: lc.underline,
+            blink: lc.blink,
+            reverse: lc.reverse,
+            dim: lc.dim,
+            strikethrough: lc.strikethrough,
+            wide_continuation: false,
+        };
+
+        row[x] = cell;
+
+        if lc.width == 2 && x + 1 < cols {
+            row[x + 1] = Cell {
+                ch: ' ',
+                fg: lc.fg,
+                bg: lc.bg,
+                bold: lc.bold,
+                italic: lc.italic,
+                underline: lc.underline,
+                blink: lc.blink,
+                reverse: lc.reverse,
+                dim: lc.dim,
+                strikethrough: lc.strikethrough,
+                wide_continuation: true,
+            };
+            x += 2;
+        } else {
+            // If cols == 1 and the logical cell is wide, render its leading cell
+            // in the only available column and advance by one to avoid overflow.
+            x += 1;
+        }
+    }
+
+    rows.push(VisualSegment {
+        row,
+        start,
+        end: line.cells.len(),
+        wrapped: if first { first_row_is_wrapped } else { true },
+    });
+
+    rows
+}
+
+/// Logical-cell offset corresponding to a display column inside a physical row.
+fn row_logical_offset_for_display_col(row: &[Cell], target_col: usize) -> usize {
+    let mut display_col = 0usize;
+    let mut x = 0usize;
+    let mut logical = 0usize;
+
+    while x < row.len() && display_col < target_col {
+        if row[x].wide_continuation {
+            x += 1;
+            continue;
+        }
+        let width = cell_display_width(row, x).max(1);
+        display_col += width;
+        x += width;
+        logical += 1;
+    }
+
+    logical
+}
+
+fn logical_display_col(cells: &[LogicalCell], start: usize, end: usize) -> usize {
+    cells[start.min(cells.len())..end.min(cells.len())]
+        .iter()
+        .map(|c| c.width.max(1))
+        .sum()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Color {
     Default,
@@ -95,12 +417,24 @@ pub struct Screen {
     /// Tab stops per column
     tab_stops: Vec<bool>,
 
-    /// Scrollback buffer (newer lines at end)
-    scrollback: VecDeque<Vec<Cell>>,
+    /// Scrollback buffer (newer lines at end) as logical lines
+    scrollback: VecDeque<LogicalLine>,
     scrollback_limit: usize,
+
+    /// Visual layout cache derived from scrollback + current cols.
+    /// Rebuilt when cols changes in resize, appended incrementally in scroll_up.
+    visual_cache: Vec<Vec<Cell>>,
+    /// visual_starts[i] = index in visual_cache where logical line i's visual rows begin.
+    visual_starts: Vec<usize>,
+    /// Whether each row in visual_cache is a soft-wrap continuation of the previous visual row.
+    visual_wrapped: Vec<bool>,
 
     /// Whether cursor is visible
     pub cursor_visible: bool,
+
+    /// Whether each visible row is a soft-wrapped continuation of the row above it.
+    /// Used by [`Self::reflow_content`] to re-wrap text when the terminal width changes.
+    wrapped: Vec<bool>,
 
     /// Main screen saved while alternate screen (vim, less, etc.) is active.
     saved_main: Option<MainScreenState>,
@@ -173,6 +507,7 @@ enum Charset {
 
 struct MainScreenState {
     cells: Vec<Vec<Cell>>,
+    wrapped: Vec<bool>,
     cursor_x: usize,
     cursor_y: usize,
     current_attrs: Cell,
@@ -192,6 +527,8 @@ impl Screen {
             tab_stops[t] = true;
         }
 
+        let wrapped = vec![false; rows];
+
         Self {
             rows,
             cols,
@@ -207,8 +544,12 @@ impl Screen {
             tab_stops,
             scrollback: VecDeque::with_capacity(5000),
             scrollback_limit: 5000,
+            visual_cache: Vec::new(),
+            visual_starts: Vec::new(),
+            visual_wrapped: Vec::new(),
             cursor_visible: true,
             saved_main: None,
+            wrapped,
             charset: 0,
             g0_charset: Charset::UsAscii,
             g1_charset: Charset::UsAscii,
@@ -253,6 +594,92 @@ impl Screen {
         std::mem::take(&mut self.scroll_scratch)
     }
 
+    /// Rebuild the visual cache from all logical lines in scrollback.
+    /// Called when `cols` changes (resize) to re-layout all history.
+    fn rebuild_visual_cache(&mut self) {
+        self.visual_cache.clear();
+        self.visual_starts.clear();
+        self.visual_wrapped.clear();
+        for line in &self.scrollback {
+            self.visual_starts.push(self.visual_cache.len());
+            for segment in layout_logical_line_segments(line, self.cols, false) {
+                self.visual_cache.push(segment.row);
+                self.visual_wrapped.push(segment.wrapped);
+            }
+        }
+    }
+
+    /// Append a new logical line to scrollback and its visual rows to the cache.
+    fn append_logical_with_visuals(&mut self, cells: Vec<LogicalCell>) {
+        self.visual_starts.push(self.visual_cache.len());
+        self.scrollback.push_back(LogicalLine { cells });
+        let last = self.scrollback.back().unwrap();
+        for segment in layout_logical_line_segments(last, self.cols, false) {
+            self.visual_cache.push(segment.row);
+            self.visual_wrapped.push(segment.wrapped);
+        }
+    }
+
+    /// Extend the last logical line's cells and recompute its visual rows in the cache.
+    fn extend_last_logical_with_visuals(&mut self, cells: Vec<LogicalCell>) {
+        if self.scrollback.is_empty() || self.visual_starts.is_empty() {
+            // If the first row we ever see is marked as a continuation, there is
+            // no previous logical line to attach to.  Preserve it as a new line
+            // instead of silently dropping it.
+            self.append_logical_with_visuals(cells);
+            return;
+        }
+
+        if let Some(last) = self.scrollback.back_mut() {
+            let old_start = self.visual_starts.pop().unwrap();
+            self.visual_cache.truncate(old_start);
+            self.visual_wrapped.truncate(old_start);
+            last.cells.extend(cells);
+            let new_start = self.visual_cache.len();
+            self.visual_starts.push(new_start);
+            for segment in layout_logical_line_segments(last, self.cols, false) {
+                self.visual_cache.push(segment.row);
+                self.visual_wrapped.push(segment.wrapped);
+            }
+        }
+    }
+
+    /// Pop the newest logical scrollback line and remove its cached visual rows.
+    /// Used during resize when the first active row is a continuation of that
+    /// scrollback line; temporarily recombining them gives correct cross-boundary
+    /// reflow.
+    fn pop_last_logical_with_visuals(&mut self) -> Option<LogicalLine> {
+        let line = self.scrollback.pop_back()?;
+        if let Some(start) = self.visual_starts.pop() {
+            self.visual_cache.truncate(start);
+            self.visual_wrapped.truncate(start);
+        } else {
+            self.visual_cache.clear();
+            self.visual_wrapped.clear();
+        }
+        Some(line)
+    }
+
+    /// Trim scrollback (and visual cache) front when exceeding the limit.
+    fn trim_scrollback_front(&mut self) {
+        let excess = self.scrollback.len().saturating_sub(self.scrollback_limit);
+        for _ in 0..excess {
+            self.scrollback.pop_front();
+            let start = self.visual_starts.remove(0);
+            let end = self
+                .visual_starts
+                .first()
+                .copied()
+                .unwrap_or(self.visual_cache.len());
+            let removed = end - start;
+            self.visual_cache.drain(0..removed);
+            self.visual_wrapped.drain(0..removed);
+            for s in &mut self.visual_starts {
+                *s -= removed;
+            }
+        }
+    }
+
     fn row_is_blank(&self, y: usize) -> bool {
         self.cells
             .get(y)
@@ -274,9 +701,19 @@ impl Screen {
 
     fn clear_row(&mut self, y: usize) {
         if let Some(row) = self.cells.get_mut(y) {
+            // This is an explicit terminal clear, not a resize.  Hidden tails kept
+            // only for resize preservation must be discarded here; otherwise old
+            // invisible text can reappear when the window grows later.
+            row.resize(self.cols, Cell::default());
             for cell in row.iter_mut() {
                 *cell = Cell::default();
             }
+        }
+        // A row that has been explicitly cleared is no longer a continuation
+        // of the previous soft-wrapped row.  Leaving this flag set causes
+        // resize reflow to concatenate unrelated prompts/history lines.
+        if let Some(w) = self.wrapped.get_mut(y) {
+            *w = false;
         }
     }
 
@@ -303,9 +740,26 @@ impl Screen {
         } else {
             self.erased_cell()
         };
+        let mut erased_whole_visible_row = false;
         if let Some(row) = self.cells.get_mut(y) {
-            for x in x_start..x_end.min(row.len()) {
+            let visible_end = x_end.min(self.cols).min(row.len());
+            for x in x_start.min(row.len())..visible_end {
                 row[x] = blank;
+            }
+            erased_whole_visible_row = x_start == 0 && x_end >= self.cols;
+            if erased_whole_visible_row {
+                // Full-row clears are real output operations, so any resize-only
+                // hidden tail must be discarded instead of preserved.
+                row.resize(self.cols, blank);
+                for cell in row.iter_mut() {
+                    *cell = blank;
+                }
+            }
+        }
+        if erased_whole_visible_row {
+            // EL 2 / ED / full-row clears break any previous soft-wrap chain.
+            if let Some(w) = self.wrapped.get_mut(y) {
+                *w = false;
             }
         }
     }
@@ -354,6 +808,7 @@ impl Screen {
         if self.saved_main.is_some() {
             // Nested smcup or recovery: clear alternate buffer again.
             self.cells = vec![vec![Cell::default(); self.cols]; self.rows];
+            self.wrapped = vec![false; self.rows];
             self.cursor_x = 0;
             self.cursor_y = 0;
             self.scroll_top = 0;
@@ -371,6 +826,7 @@ impl Screen {
                 &mut self.cells,
                 vec![vec![Cell::default(); self.cols]; self.rows],
             ),
+            wrapped: std::mem::take(&mut self.wrapped),
             cursor_x: self.cursor_x,
             cursor_y: self.cursor_y,
             current_attrs: self.current_attrs,
@@ -388,6 +844,7 @@ impl Screen {
         self.saved_main = Some(snapshot);
         self.cursor_x = 0;
         self.cursor_y = 0;
+        self.wrapped = vec![false; self.rows];
         self.scroll_top = 0;
         self.scroll_bottom = self.rows.saturating_sub(1);
         self.origin_mode = false;
@@ -403,6 +860,7 @@ impl Screen {
             return;
         };
         self.cells = main.cells;
+        self.wrapped = main.wrapped;
         self.current_attrs = main.current_attrs;
         self.scroll_top = main.scroll_top;
         self.scroll_bottom = main.scroll_bottom;
@@ -436,16 +894,282 @@ impl Screen {
         }
     }
 
-    fn resize_grid(cells: &[Vec<Cell>], old_rows: usize, old_cols: usize, rows: usize, cols: usize) -> Vec<Vec<Cell>> {
+    /// Reflow the main-screen visible grid itself when the terminal width changes.
+    ///
+    /// Scrollback is already stored as logical lines and rebuilt through
+    /// `visual_cache`; this function performs the same logical-line conversion
+    /// for rows that are still on the active main screen.  Hard-newline rows stay
+    /// as independent logical lines, while rows marked `wrapped=true` are merged
+    /// with the preceding logical line.
+    fn reflow_visible_main_grid(&mut self, rows: usize, cols: usize) {
+        let old_cells = std::mem::take(&mut self.cells);
+        let old_wrapped = std::mem::take(&mut self.wrapped);
+        let old_cursor_y = self.cursor_y;
+        let old_cursor_x = self.cursor_x;
+
+        let mut logical_lines: Vec<LogicalLine> = Vec::new();
+        let mut first_wrapped: Vec<bool> = Vec::new();
+        let mut row_to_line: Vec<usize> = vec![0; old_cells.len()];
+        let mut row_base_offset: Vec<usize> = vec![0; old_cells.len()];
+
+        for (r, row) in old_cells.iter().enumerate() {
+            let is_cont = old_wrapped.get(r).copied().unwrap_or(false);
+            let next_is_cont = old_wrapped.get(r + 1).copied().unwrap_or(false);
+            // If the next row is a soft-wrap continuation, this row is an
+            // interior segment of the same logical line.  Preserve trailing
+            // spaces at the segment boundary; they may be real column padding.
+            let cells = row_to_logical_cells_with_trim(row, !next_is_cont);
+
+            if is_cont && !logical_lines.is_empty() {
+                let li = logical_lines.len() - 1;
+                row_to_line[r] = li;
+                row_base_offset[r] = logical_lines[li].cells.len();
+                logical_lines[li].cells.extend(cells);
+            } else {
+                let li = logical_lines.len();
+                row_to_line[r] = li;
+                row_base_offset[r] = 0;
+                logical_lines.push(LogicalLine { cells });
+                // If the first active row is already a continuation, it belongs
+                // to a logical line whose prefix is above the viewport. Preserve
+                // that continuation flag so a later scroll_up can reconnect it
+                // with the previous scrollback line.
+                first_wrapped.push(is_cont);
+            }
+        }
+
+        // If the first active row is a continuation, its prefix is the newest
+        // logical line in scrollback.  Recombine them before reflow so growing the
+        // terminal can join the line cleanly across the scrollback/screen boundary.
+        if first_wrapped.first().copied().unwrap_or(false) {
+            if let Some(prefix) = self.pop_last_logical_with_visuals() {
+                if !logical_lines.is_empty() {
+                    let prefix_len = prefix.cells.len();
+                    let mut combined = prefix.cells;
+                    combined.extend(std::mem::take(&mut logical_lines[0].cells));
+                    logical_lines[0].cells = combined;
+                    first_wrapped[0] = false;
+                    for (r, li) in row_to_line.iter().copied().enumerate() {
+                        if li == 0 {
+                            row_base_offset[r] += prefix_len;
+                        }
+                    }
+                } else {
+                    logical_lines.push(prefix);
+                    first_wrapped.push(false);
+                }
+            }
+        }
+
+        let cursor_line_and_offset = if old_cursor_y < old_cells.len() {
+            let li = row_to_line[old_cursor_y];
+            let offset = row_base_offset[old_cursor_y]
+                + row_logical_offset_for_display_col(&old_cells[old_cursor_y], old_cursor_x);
+            Some((li, offset.min(logical_lines[li].cells.len())))
+        } else {
+            None
+        };
+
+        let mut visual_rows: Vec<(usize, VisualSegment)> = Vec::new();
+        for (li, line) in logical_lines.iter().enumerate() {
+            for segment in layout_logical_line_segments(line, cols, first_wrapped[li]) {
+                visual_rows.push((li, segment));
+            }
+        }
+
+        let visible_start = visual_rows.len().saturating_sub(rows);
+
+        // Rows that move above the viewport because of reflow become scrollback.
+        // If only a prefix of a logical line moves into scrollback, the first
+        // visible segment remains `wrapped=true`; when it later scrolls up,
+        // `scroll_up` will extend this same logical line instead of creating a
+        // duplicate hard line.
+        for i in 0..visible_start {
+            let (li, segment) = &visual_rows[i];
+            let line = &logical_lines[*li];
+            let cells = line.cells[segment.start.min(line.cells.len())..segment.end.min(line.cells.len())]
+                .to_vec();
+            if segment.wrapped {
+                self.extend_last_logical_with_visuals(cells);
+            } else {
+                self.append_logical_with_visuals(cells);
+            }
+        }
+        if visible_start > 0 {
+            self.trim_scrollback_front();
+        }
+
+        self.cells = Vec::with_capacity(rows);
+        self.wrapped = Vec::with_capacity(rows);
+        for (_, segment) in visual_rows.iter().skip(visible_start) {
+            self.cells.push(segment.row.clone());
+            self.wrapped.push(segment.wrapped);
+        }
+
+        while self.cells.len() < rows {
+            self.cells.push(vec![Cell::default(); cols]);
+            self.wrapped.push(false);
+        }
+
+        let mut new_cursor_y = self.cells.len().saturating_sub(1);
+        let mut new_cursor_x = 0usize;
+
+        if let Some((cursor_line, cursor_offset)) = cursor_line_and_offset {
+            for (global_row, (li, segment)) in visual_rows.iter().enumerate() {
+                if *li != cursor_line {
+                    continue;
+                }
+
+                let contains_cursor = if segment.start == segment.end {
+                    cursor_offset == segment.start
+                } else {
+                    cursor_offset >= segment.start && cursor_offset <= segment.end
+                };
+
+                if contains_cursor {
+                    if global_row >= visible_start {
+                        let line = &logical_lines[*li];
+                        new_cursor_y = global_row - visible_start;
+                        new_cursor_x = logical_display_col(
+                            &line.cells,
+                            segment.start,
+                            cursor_offset.min(segment.end),
+                        )
+                        .min(cols.saturating_sub(1));
+                    } else {
+                        new_cursor_y = 0;
+                        new_cursor_x = 0;
+                    }
+                    break;
+                }
+            }
+        }
+
+        self.cursor_y = new_cursor_y.min(rows.saturating_sub(1));
+        self.cursor_x = new_cursor_x.min(cols.saturating_sub(1));
+    }
+
+    /// Reflow the saved main-screen snapshot while the alternate screen is active.
+    ///
+    /// The alternate buffer itself should remain an exact rows×cols grid and will be
+    /// repainted by the TUI after SIGWINCH.  The saved main buffer, however, is normal
+    /// shell history; if the window is resized while htop/vim is open, it must be
+    /// reflowed with the same logical-line model as the live main screen.  Otherwise
+    /// leaving the alternate screen restores stale physical rows from the old size.
+    fn reflow_saved_main_for_resize(
+        &mut self,
+        mut main: MainScreenState,
+        rows: usize,
+        cols: usize,
+    ) -> MainScreenState {
+        let alt_cells = std::mem::replace(&mut self.cells, main.cells);
+        let alt_wrapped = std::mem::replace(&mut self.wrapped, main.wrapped);
+        let alt_cursor_x = self.cursor_x;
+        let alt_cursor_y = self.cursor_y;
+        let alt_saved_cursor_x = self.saved_cursor_x;
+        let alt_saved_cursor_y = self.saved_cursor_y;
+        let alt_scroll_top = self.scroll_top;
+        let alt_scroll_bottom = self.scroll_bottom;
+        let alt_origin_mode = self.origin_mode;
+        let alt_pending_wrap = self.pending_wrap;
+
+        self.cursor_x = main.cursor_x;
+        self.cursor_y = main.cursor_y;
+        self.saved_cursor_x = main.saved_cursor_x;
+        self.saved_cursor_y = main.saved_cursor_y;
+        self.scroll_top = main.scroll_top;
+        self.scroll_bottom = main.scroll_bottom;
+        self.origin_mode = main.origin_mode;
+        self.pending_wrap = main.pending_wrap;
+
+        self.reflow_visible_main_grid(rows, cols);
+
+        main.cells = std::mem::replace(&mut self.cells, alt_cells);
+        main.wrapped = std::mem::replace(&mut self.wrapped, alt_wrapped);
+        main.cursor_x = self.cursor_x.min(cols.saturating_sub(1));
+        main.cursor_y = self.cursor_y.min(rows.saturating_sub(1));
+        main.saved_cursor_x = self.saved_cursor_x.min(cols.saturating_sub(1));
+        main.saved_cursor_y = self.saved_cursor_y.min(rows.saturating_sub(1));
+        main.scroll_top = 0;
+        main.scroll_bottom = rows.saturating_sub(1);
+        main.origin_mode = false;
+        main.pending_wrap = false;
+
+        self.cursor_x = alt_cursor_x;
+        self.cursor_y = alt_cursor_y;
+        self.saved_cursor_x = alt_saved_cursor_x;
+        self.saved_cursor_y = alt_saved_cursor_y;
+        self.scroll_top = alt_scroll_top;
+        self.scroll_bottom = alt_scroll_bottom;
+        self.origin_mode = alt_origin_mode;
+        self.pending_wrap = alt_pending_wrap;
+
+        main
+    }
+
+    /// Resize a row to exactly `cols` cells.  Use this for alternate-screen
+    /// buffers where the application is expected to repaint after SIGWINCH.
+    fn resize_row_exact_preserving_wide(src: &[Cell], cols: usize) -> Vec<Cell> {
+        let mut row_cells = vec![Cell::default(); cols];
+        if cols == 0 {
+            return row_cells;
+        }
+
+        let copy_len = cols.min(src.len());
+        row_cells[..copy_len].copy_from_slice(&src[..copy_len]);
+
+        // If the resize boundary cuts a wcwidth=2 character between its leading
+        // cell and continuation cell, drop the dangling leading cell.  Otherwise
+        // the renderer later treats it as a normal-width glyph and columns drift.
+        if copy_len < src.len() && copy_len > 0 && src[copy_len].wide_continuation {
+            row_cells[copy_len - 1] = Cell::default();
+        }
+
+        if row_cells[0].wide_continuation {
+            row_cells[0] = Cell::default();
+        }
+
+        row_cells
+    }
+
+    /// Resize a main-screen row without discarding the right-hand tail when the
+    /// terminal becomes narrower.  The renderer must only paint columns
+    /// `0..self.cols`; cells beyond `self.cols` are hidden preservation data and
+    /// will become visible again if the terminal grows.
+    fn resize_row_keep_tail(src: &[Cell], cols: usize) -> Vec<Cell> {
+        let target_len = src.len().max(cols);
+        let mut row_cells = vec![Cell::default(); target_len];
+        if !src.is_empty() {
+            row_cells[..src.len()].copy_from_slice(src);
+        }
+
+        if !row_cells.is_empty() && row_cells[0].wide_continuation {
+            row_cells[0] = Cell::default();
+        }
+
+        row_cells
+    }
+
+    fn resize_grid_exact(cells: &[Vec<Cell>], old_rows: usize, rows: usize, cols: usize) -> Vec<Vec<Cell>> {
         (0..rows)
             .map(|r| {
-                let mut row_cells = vec![Cell::default(); cols];
                 if r < old_rows {
-                    let src_row = &cells[r];
-                    let copy_len = cols.min(old_cols);
-                    row_cells[..copy_len].copy_from_slice(&src_row[..copy_len]);
+                    Self::resize_row_exact_preserving_wide(&cells[r], cols)
+                } else {
+                    vec![Cell::default(); cols]
                 }
-                row_cells
+            })
+            .collect()
+    }
+
+    fn resize_grid_keep_tails(cells: &[Vec<Cell>], old_rows: usize, rows: usize, cols: usize) -> Vec<Vec<Cell>> {
+        (0..rows)
+            .map(|r| {
+                if r < old_rows {
+                    Self::resize_row_keep_tail(&cells[r], cols)
+                } else {
+                    vec![Cell::default(); cols]
+                }
             })
             .collect()
     }
@@ -457,11 +1181,29 @@ impl Screen {
 
         let old_rows = self.rows;
         let old_cols = self.cols;
+        let col_changed = cols != old_cols;
+        let in_alt = self.in_alternate_screen();
 
-        self.cells = Self::resize_grid(&self.cells, old_rows, old_cols, rows, cols);
+        // If the alternate screen is active, resize/reflow the saved main-screen
+        // snapshot as main-screen history.  This keeps the shell buffer sane after
+        // leaving htop/vim when the window was resized inside the alternate screen.
+        if in_alt {
+            if let Some(main) = self.saved_main.take() {
+                self.saved_main = Some(self.reflow_saved_main_for_resize(main, rows, cols));
+            }
+        }
 
-        if let Some(main) = self.saved_main.as_mut() {
-            main.cells = Self::resize_grid(&main.cells, old_rows, old_cols, rows, cols);
+        if in_alt {
+            // Alternate-screen TUIs repaint after SIGWINCH.  Keep the alternate
+            // buffer exact-width to avoid stale hidden tails in htop/btop/vim.
+            self.cells = Self::resize_grid_exact(&self.cells, old_rows, rows, cols);
+            self.wrapped.resize(rows, false);
+        } else {
+            // Main-screen rows are active history too. Convert them to logical
+            // lines, wrap at the new width, and keep the bottom of the resulting
+            // visual stream visible. Overflow above the viewport is appended to
+            // logical scrollback, so shrinking does not destroy buffer content.
+            self.reflow_visible_main_grid(rows, cols);
         }
 
         self.rows = rows;
@@ -473,10 +1215,8 @@ impl Screen {
         self.scroll_top = 0;
         self.scroll_bottom = rows.saturating_sub(1);
 
-        if self.in_alternate_screen() {
+        if in_alt {
             self.origin_mode = false;
-        } else {
-            self.scroll_top = self.scroll_top.min(self.scroll_bottom);
         }
 
         let mut tab_stops = vec![false; cols];
@@ -486,9 +1226,14 @@ impl Screen {
         self.tab_stops = tab_stops;
 
         self.scroll_scratch.clear();
-
-        // 如果你已经加了 delayed autowrap
         self.pending_wrap = false;
+
+        // Re-layout all logical lines in scrollback when width changes.  Do this
+        // even while in the alternate screen because saved-main reflow may have
+        // appended logical lines using the old cache width.
+        if col_changed {
+            self.rebuild_visual_cache();
+        }
     }
 
     fn clear_wide_trailer(&mut self, row: usize, col: usize) {
@@ -501,7 +1246,7 @@ impl Screen {
         if self.pending_wrap {
             self.pending_wrap = false;
             if self.auto_wrap {
-                self.newline();
+                self.newline_with_wrap(true);
                 self.cursor_x = 0;
             }
         }
@@ -515,7 +1260,7 @@ impl Screen {
             return true;
         }
         if self.auto_wrap {
-            self.newline();
+            self.newline_with_wrap(true);
             self.cursor_x = 0;
             self.cursor_x + width <= self.cols
         } else {
@@ -596,6 +1341,18 @@ impl Screen {
     }
 
     pub fn newline(&mut self) {
+        self.newline_with_wrap(false);
+    }
+
+    /// Move cursor to the next line.  `wrapped` should be `true` when the cursor
+    /// moves because a printable character overflowed the right margin (soft wrap);
+    /// these rows can be merged back together on width increase (reflow).
+    ///
+    /// IMPORTANT: when `wrapped` is `false` (hard newline such as LF/CR), the
+    /// destination row's wrapped flag is **cleared**.  Previously-set wrapped
+    /// flags on stale rows (e.g. from a prior wrap that was overtaken by a hard
+    /// newline) would otherwise cause reflow to merge unrelated content.
+    fn newline_with_wrap(&mut self, wrapped: bool) {
         self.pending_wrap = false;
         if self.cursor_y == self.scroll_bottom {
             self.scroll_up(1);
@@ -603,6 +1360,9 @@ impl Screen {
             self.cursor_y = (self.cursor_y + 1).min(self.rows.saturating_sub(1));
         }
         self.cursor_x = 0;
+        if self.cursor_y < self.rows {
+            self.wrapped[self.cursor_y] = wrapped;
+        }
     }
 
     /// BS (0x08): move cursor left without erasing (zsh uses this for line redraw).
@@ -707,15 +1467,30 @@ impl Screen {
         let use_scrollback = !self.in_alternate_screen();
 
         for _ in 0..n {
+            let next_is_wrapped = self.wrapped.get(start + 1).copied().unwrap_or(false);
             let removed = self.cells.remove(start);
+            let was_wrapped = self.wrapped.remove(start);
+
             if use_scrollback {
-                if self.scrollback.len() >= self.scrollback_limit {
-                    self.scrollback.pop_front();
+                // If the following row is a continuation, the removed row is an
+                // interior segment of a logical line.  Keep trailing spaces so
+                // re-layout can later reconstruct the exact text stream.
+                let logical_cells = row_to_logical_cells_with_trim(&removed, !next_is_wrapped);
+
+                if was_wrapped {
+                    // Continuation of the previous logical line: extend it.
+                    self.extend_last_logical_with_visuals(logical_cells);
+                } else {
+                    // New logical line.
+                    self.append_logical_with_visuals(logical_cells);
                 }
-                self.scrollback.push_back(removed);
+
+                self.trim_scrollback_front();
             }
+
             let blank = self.blank_scroll_row();
             self.cells.insert(self.scroll_bottom, blank);
+            self.wrapped.insert(self.scroll_bottom, false);
         }
     }
 
@@ -723,8 +1498,10 @@ impl Screen {
         let n = n.min(self.scroll_bottom - self.scroll_top + 1);
         for _ in 0..n {
             let _removed = self.cells.remove(self.scroll_bottom);
+            let _w = self.wrapped.remove(self.scroll_bottom);
             self.cells
                 .insert(self.scroll_top, vec![Cell::default(); self.cols]);
+            self.wrapped.insert(self.scroll_top, false);
         }
     }
 
@@ -745,22 +1522,119 @@ impl Screen {
         self.scrollback_limit = limit.min(MAX_SCROLLBACK);
     }
 
+    /// Number of visual rows in the scrollback (derived from logical lines + current cols).
     pub fn scrollback_lines(&self) -> usize {
-        self.scrollback.len()
+        self.visual_cache.len()
     }
 
+    /// Get the visual row at `index` in scrollback (0 = oldest visible in scrollback).
     pub fn scrollback_row(&self, index: usize) -> Option<&[Cell]> {
-        self.scrollback.get(index).map(|v| v.as_slice())
+        self.visual_cache.get(index).map(|v| v.as_slice())
+    }
+
+    /// Whether the visual scrollback row at `index` is a soft-wrap continuation.
+    pub fn scrollback_row_wrapped(&self, index: usize) -> Option<bool> {
+        self.visual_wrapped.get(index).copied()
+    }
+
+    /// Whether the visible row at `y` was soft-wrapped from the row above it.
+    pub fn row_wrapped(&self, y: usize) -> bool {
+        self.wrapped.get(y).copied().unwrap_or(false)
+    }
+
+    /// Number of active main-screen rows that should participate in the live-tail
+    /// viewport.  Rows below the cursor/last nonblank line are just terminal blank
+    /// space; treating them as part of the live tail makes resize growth appear to
+    /// insert a large gap between scrollback and the prompt.
+    pub fn active_main_rows(&self) -> usize {
+        if self.in_alternate_screen() {
+            return self.rows;
+        }
+        if self.rows == 0 || self.cells.is_empty() {
+            return 0;
+        }
+
+        let visible_rows = self.rows.min(self.cells.len());
+        let mut last = self.cursor_y.min(visible_rows.saturating_sub(1));
+        for y in 0..visible_rows {
+            if self.cells[y]
+                .iter()
+                .take(self.cols.min(self.cells[y].len()))
+                .any(|c| (c.ch != ' ' || c.wide_continuation))
+            {
+                last = last.max(y);
+            }
+        }
+        (last + 1).min(visible_rows)
+    }
+
+    /// First virtual line to paint for the live tail.  Unlike the old
+    /// `scrollback_lines() - offset` scheme, this ignores blank rows below the
+    /// cursor, so expanding the window pulls scrollback lines into view above the
+    /// prompt instead of leaving a huge blank gap.
+    pub fn live_virtual_start(&self, viewport_rows: usize) -> usize {
+        if self.in_alternate_screen() {
+            0
+        } else {
+            let total = self.scrollback_lines() + self.active_main_rows();
+            total.saturating_sub(viewport_rows)
+        }
+    }
+
+    /// Maximum scrollback offset for a viewport of `viewport_rows` rows.
+    pub fn max_scroll_offset(&self, viewport_rows: usize) -> usize {
+        self.live_virtual_start(viewport_rows)
+    }
+
+    /// Viewport start after applying a user scroll offset.  Offset 0 means the
+    /// live tail; increasing offset moves toward older history.
+    pub fn viewport_virtual_start(&self, viewport_rows: usize, scroll_offset: usize) -> usize {
+        self.live_virtual_start(viewport_rows)
+            .saturating_sub(scroll_offset.min(self.max_scroll_offset(viewport_rows)))
+    }
+
+    /// Whether the cursor is visible in the current viewport, and if so which
+    /// viewport row it occupies.
+    pub fn cursor_viewport_row(&self, viewport_rows: usize, scroll_offset: usize) -> Option<usize> {
+        if self.in_alternate_screen() {
+            return (self.cursor_y < viewport_rows).then_some(self.cursor_y);
+        }
+        if scroll_offset != 0 {
+            return None;
+        }
+        let cursor_line = self.scrollback_lines() + self.cursor_y;
+        let start = self.viewport_virtual_start(viewport_rows, scroll_offset);
+        (cursor_line >= start && cursor_line < start + viewport_rows).then_some(cursor_line - start)
+    }
+
+    /// Whether a virtual row (scrollback + visible screen) is a soft-wrap continuation.
+    /// Use this for copy/selection so it follows the same visual model as rendering.
+    pub fn virtual_line_wrapped(&self, virtual_line: usize) -> bool {
+        if self.in_alternate_screen() {
+            return self.wrapped.get(virtual_line).copied().unwrap_or(false);
+        }
+        let sb = self.visual_cache.len();
+        if virtual_line < sb {
+            self.visual_wrapped.get(virtual_line).copied().unwrap_or(false)
+        } else {
+            self.wrapped
+                .get(virtual_line - sb)
+                .copied()
+                .unwrap_or(false)
+        }
     }
 
     /// Line in scrollback + main buffer coordinates (used for selection and copy).
+    ///
+    /// Virtual lines 0..scrollback_lines() are visual rows from scrollback (logical lines
+    /// laid out at the current terminal width).  The remaining lines are visible screen rows.
     pub fn line_at_virtual(&self, virtual_line: usize) -> Option<&[Cell]> {
         if self.in_alternate_screen() {
             return self.cells.get(virtual_line).map(|r| r.as_slice());
         }
-        let sb = self.scrollback.len();
+        let sb = self.visual_cache.len();
         if virtual_line < sb {
-            self.scrollback.get(virtual_line).map(|v| v.as_slice())
+            self.visual_cache.get(virtual_line).map(|v| v.as_slice())
         } else if virtual_line < sb + self.rows {
             self.cells
                 .get(virtual_line - sb)
@@ -1058,8 +1932,10 @@ impl TermHandler for Screen {
                 let n = (def(0, 1) as usize).max(1);
                 for _ in 0..n {
                     self.cells.remove(self.scroll_bottom);
+                    self.wrapped.remove(self.scroll_bottom);
                     let blank = self.blank_scroll_row();
                     self.cells.insert(self.cursor_y, blank);
+                    self.wrapped.insert(self.cursor_y, false);
                 }
             }
             b'M' => {
@@ -1067,8 +1943,10 @@ impl TermHandler for Screen {
                 let n = (def(0, 1) as usize).max(1);
                 for _ in 0..n {
                     self.cells.remove(self.cursor_y);
+                    self.wrapped.remove(self.cursor_y);
                     self.cells
                         .insert(self.scroll_bottom, vec![Cell::default(); self.cols]);
+                    self.wrapped.insert(self.scroll_bottom, false);
                 }
             }
             b'P' => {

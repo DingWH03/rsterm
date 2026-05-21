@@ -12,13 +12,19 @@ pub fn paint_cursor(
     cell_h: f32,
     style: CursorStyle,
     now: Option<std::time::Instant>,
+    viewport_row: Option<usize>,
 ) {
     let rows = screen.rows;
     let cols = screen.cols;
     if rows == 0 || cols == 0 || cell_w <= 0.0 || cell_h <= 0.0 {
         return;
     }
-    if !screen.cursor_visible || screen.cursor_y >= rows || screen.cursor_x >= cols {
+    let paint_row = viewport_row.unwrap_or(screen.cursor_y);
+    if !screen.cursor_visible
+        || screen.cursor_y >= rows
+        || screen.cursor_x >= cols
+        || paint_row >= rows
+    {
         return;
     }
 
@@ -40,7 +46,7 @@ pub fn paint_cursor(
         .unwrap_or(1)
         .max(1);
     let cx = rect.left() + screen.cursor_x as f32 * cell_w;
-    let cy = rect.top() + screen.cursor_y as f32 * cell_h;
+    let cy = rect.top() + paint_row as f32 * cell_h;
     let cell_rect = egui::Rect::from_min_size(
         egui::pos2(cx, cy),
         egui::vec2(cell_w * span as f32, cell_h),

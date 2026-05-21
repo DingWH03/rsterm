@@ -216,31 +216,32 @@ pub fn pointer_to_cell(
     let line = if screen.in_alternate_screen() {
         row
     } else {
-        let sb = screen.scrollback_lines();
-        let virtual_start = sb.saturating_sub(scroll_offset);
-        virtual_start + row
+        screen.viewport_virtual_start(rows, scroll_offset) + row
     };
     Some(CellPos { line, col })
 }
 
 pub fn extract_range_text(screen: &Screen, (start, end): (CellPos, CellPos)) -> String {
-    let mut lines = Vec::new();
+    let mut out = String::new();
     for line in start.line..=end.line {
         let Some(cells) = screen.line_at_virtual(line) else {
             continue;
         };
-        let cols = cells.len();
+        let cols = screen.cols.min(cells.len());
         let col_start = if line == start.line { start.col } else { 0 };
         let col_end = if line == end.line {
-            end.col
+            end.col.min(cols.saturating_sub(1))
         } else {
             cols.saturating_sub(1)
         };
+        if line > start.line && !screen.virtual_line_wrapped(line) {
+            out.push('\n');
+        }
         if col_start <= col_end {
-            lines.push(line_slice_text(cells, col_start, col_end));
+            out.push_str(&line_slice_text(cells, col_start, col_end));
         }
     }
-    lines.join("\n")
+    out
 }
 
 fn line_slice_text(cells: &[crate::terminal::screen::Cell], start_col: usize, end_col: usize) -> String {
@@ -282,15 +283,10 @@ pub fn paint_selection(
 
     let (start, end) = selection.range();
     let in_alt = screen.in_alternate_screen();
-    let sb_lines = if in_alt {
-        0
-    } else {
-        screen.scrollback_lines()
-    };
     let virtual_start = if in_alt {
         0
     } else {
-        sb_lines.saturating_sub(scroll_offset)
+        screen.viewport_virtual_start(rows, scroll_offset)
     };
 
     for row in 0..rows {

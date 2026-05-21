@@ -424,15 +424,23 @@ mod tests {
     }
 
     #[test]
-    fn alternate_screen_resize_clears_stale_cells() {
+    fn alternate_screen_preserves_content_on_resize() {
         let mut term = Terminal::new(4, 20);
         term.write(b"\x1b[?1049h\x1b[2J\x1b[H");
         term.write(b"ROW0-OLD-CONTENT-HERE");
         term.screen.resize(6, 30);
         let row0: String = term.screen.cells[0].iter().map(|c| c.ch).collect();
         assert!(
-            row0.trim().is_empty(),
-            "alternate buffer must be blank after resize until app redraws, got {row0:?}"
+            row0.contains("ROW0-OLD-CONTENT"),
+            "alternate buffer should preserve existing content on resize until app redraws, got {row0:?}"
+        );
+        // After the app redraws (e.g. via SIGWINCH), old data is overwritten.
+        term.write(b"\x1b[2J\x1b[H");
+        term.write(b"ROW0-FRESH-CONTENT");
+        let refreshed: String = term.screen.cells[0].iter().map(|c| c.ch).collect();
+        assert!(
+            refreshed.contains("ROW0-FRESH"),
+            "after alt-screen app redraws, old content must be replaced, got {refreshed:?}"
         );
     }
 
@@ -675,7 +683,6 @@ mod tests {
         assert_eq!(row[2].ch, 'z');
         assert_eq!(row[2].fg, Color::Indexed(244));
     }
-}
 
     #[test]
     fn btop_like_status_bar_on_first_row() {
@@ -787,12 +794,12 @@ mod tests {
         // Now resize while in alt screen (simulating window resize)
         term.screen.resize(40, 120);
         
-        // After resize, check row 0 and 1
-        // Note: resize clears alt screen cells, so old content is gone
+        // After resize, old alt-screen content is preserved (not cleared) until
+        // the app redraws after SIGWINCH.
         let row0: String = term.screen.cells[0].iter().map(|c| c.ch).collect();
         assert!(
-            row0.trim().is_empty(),
-            "alt screen should be blank after resize, got row0={row0:?}"
+            !row0.trim().is_empty(),
+            "alt screen should preserve content after resize until app redraws, got row0={row0:?}"
         );
         
         // Now simulate btop repaint after SIGWINCH
@@ -839,3 +846,98 @@ mod tests {
         let row2: String = term.screen.cells[2].iter().map(|c| c.ch).collect();
         assert_ne!(row1.trim_end(), row2.trim_end(), "rows 1,2 identical");
     }
+
+    #[test]
+    fn scrollback_logical_line_preserves_content_on_shrink() {
+        let mut term = Terminal::new(3, 40);
+        // 65 chars @ 40 cols → row0=40 (wrapped=false), row1=25 (wrapped=true).
+        term.write(b"AAAAABBBBBCCCCCDDDDDEEEEEFFFFFGGGGGHHHHHIIIIIJJJJJKKKKKLLLLLMMMMM");
+        // Scroll both visible rows into scrollback (3 newlines for 3 rows).
+        term.write(b"\nXXXXX\nYYYYY\nZZZZZ");
+
+        let sb_rows = term.screen.scrollback_lines();
+        assert!(sb_rows > 0, "expected scrollback content");
+
+        // Shrink width — same logical line produces MORE visual rows.
+        let old_rows = sb_rows;
+        term.resize(3, 20);
+        let new_rows = term.screen.scrollback_lines();
+        assert!(
+            new_rows >= old_rows,
+            "visual rows should not decrease on shrink (was {old_rows}, now {new_rows})"
+        );
+
+        let all_text: String = (0..term.screen.scrollback_lines())
+            .filter_map(|i| term.screen.scrollback_row(i))
+            .flat_map(|row| row.iter().map(|c| c.ch))
+            .collect();
+        assert!(all_text.contains("AAAAA"), "should contain start, got {all_text:?}");
+        assert!(all_text.contains("MMMMM"), "should contain end, got {all_text:?}");
+    }
+
+    #[test]
+    fn scrollback_logical_line_merges_on_widen() {
+        let mut term = Terminal::new(3, 20);
+        // 52 chars @ 20 cols → row0=20, row1=20, row2=12, all wrapped continuations.
+        term.write(b"AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIIIJJJJKKKKLLLLMMMM");
+        term.write(b"\nXXXX\nYYYY\nZZZZ");
+
+        let old_rows = term.screen.scrollback_lines();
+
+        term.resize(3, 40);
+        let new_rows = term.screen.scrollback_lines();
+        assert!(
+            new_rows <= old_rows || new_rows == 0,
+            "visual rows should not increase on widen (was {old_rows}, now {new_rows})"
+        );
+
+        let new_text: String = (0..term.screen.scrollback_lines())
+            .filter_map(|i| term.screen.scrollback_row(i))
+            .flat_map(|row| row.iter().map(|c| c.ch))
+            .collect();
+        assert!(new_text.contains("AAAA"), "{new_text:?} should contain AAAA");
+        assert!(new_text.contains("MMMM"), "{new_text:?} should contain MMMM");
+    }
+
+    #[test]
+    fn resize_clamps_cursor_to_bounds() {
+        let mut term = Terminal::new(4, 30);
+        term.write(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        // Cursor is after Z at col 26.
+        assert_eq!(term.screen.cursor_y, 0);
+        assert_eq!(term.screen.cursor_x, 26);
+        // Resize narrower — cursor gets clamped (visible grid truncated).
+        term.resize(4, 10);
+        assert_eq!(term.screen.cursor_x, 9, "cursor clamped to last col");
+        assert_eq!(term.screen.cursor_y, 0, "cursor stays on row 0");
+    }
+
+    #[test]
+    fn scrollback_hard_newline_preserves_separate_logical_lines() {
+        let mut term = Terminal::new(2, 30);
+        // Write two lines with hard newline, then scroll them into scrollback.
+        term.write(b"FIRST LINE\nSECOND LINE\nTHIRD LINE\nFOURTH");
+
+        // Resize narrower — logical lines should remain separate in scrollback.
+        term.resize(2, 15);
+
+        // No visual row should contain both FIRST and SECOND.
+        for row_idx in 0..term.screen.scrollback_lines() {
+            if let Some(row) = term.screen.scrollback_row(row_idx) {
+                let txt: String = row.iter().map(|c| c.ch).collect();
+                assert!(
+                    !(txt.contains("FIRST") && txt.contains("SECOND")),
+                    "row {row_idx} must not merge FIRST+SECOND, got {txt:?}"
+                );
+            }
+        }
+
+        // Both keywords should be present somewhere in scrollback.
+        let all_text: String = (0..term.screen.scrollback_lines())
+            .filter_map(|i| term.screen.scrollback_row(i))
+            .flat_map(|row| row.iter().map(|c| c.ch))
+            .collect();
+        assert!(all_text.contains("FIRST"), "FIRST should be in scrollback, got {all_text:?}");
+        assert!(all_text.contains("SECOND"), "SECOND should be in scrollback, got {all_text:?}");
+    }
+}

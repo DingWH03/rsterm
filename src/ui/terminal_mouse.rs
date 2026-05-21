@@ -195,7 +195,7 @@ pub fn process_terminal_wheel(
     grid_cols: usize,
     screen: &Screen,
     in_alt: bool,
-    sb_lines: usize,
+    max_scroll_offset: usize,
     scroll_offset_mut: &mut usize,
     pending_input: &mut Vec<Vec<u8>>,
 ) {
@@ -255,10 +255,13 @@ pub fn process_terminal_wheel(
         return;
     }
 
-    if sb_lines > 0 {
+    if max_scroll_offset > 0 {
         let change = (delta * 3.0).round() as isize;
-        let new_offset = (*scroll_offset_mut as isize + change).clamp(0, sb_lines as isize) as usize;
+        let new_offset = (*scroll_offset_mut as isize + change)
+            .clamp(0, max_scroll_offset as isize) as usize;
         *scroll_offset_mut = new_offset;
+    } else {
+        *scroll_offset_mut = 0;
     }
 }
 
