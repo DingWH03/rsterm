@@ -63,10 +63,11 @@ pub fn connect_serial(config: &SavedConnection) -> Result<ConnectionHandle, Stri
     let writer_thread = std::thread::spawn(move || {
         loop {
             match to_conn_rx.recv() {
-                Ok(ConnOut::Data(data)) => {
+                Ok(ConnOut::Data(data)) | Ok(ConnOut::PortData { port: 0, data }) => {
                     let _ = writer.write_all(&data);
                     let _ = writer.flush();
                 }
+                Ok(ConnOut::PortData { .. }) => {}
                 Ok(ConnOut::Resize(_, _)) | Ok(ConnOut::Winch) => {}
                 Ok(ConnOut::Close) => {
                     writer_alive.store(false, Ordering::Relaxed);

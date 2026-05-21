@@ -159,11 +159,12 @@ async fn run_ssh(
             }
             out = out_async_rx.recv() => {
                 match out {
-                    Some(ConnOut::Data(data)) => {
+                    Some(ConnOut::Data(data)) | Some(ConnOut::PortData { port: 0, data }) => {
                         if channel.data(&data[..]).await.is_err() {
                             break;
                         }
                     }
+                    Some(ConnOut::PortData { .. }) => {}
                     Some(ConnOut::Resize(rows, cols)) => {
                         let _ = channel
                             .window_change(cols.max(1) as u32, rows.max(1) as u32, 0, 0)

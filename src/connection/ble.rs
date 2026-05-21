@@ -11,104 +11,184 @@ use futures::StreamExt;
 use uuid::Uuid;
 
 use crate::connection::{
-    emit_conn_data, ConnIn, ConnOut, ConnectionHandle, ConnectionState, RepaintNotifier,
+    emit_conn_port_data, emit_conn_ports_changed, ConnIn, ConnOut, ConnectionHandle,
+    ConnectionPort, ConnectionPortKind, ConnectionState, RepaintNotifier,
 };
 use crate::storage::types::SavedConnection;
 
 // ---------------------------------------------------------------------------
-// 已知的 BLE UART 服务配置清单
+// Built-in BLE terminal profiles
 // ---------------------------------------------------------------------------
 
-/// Nordic UART Service (NUS)
+/// Nordic UART Service (NUS).
 const NUS_SERVICE_UUID: &str = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
-
-/// NUS RX: central -> peripheral，也就是本程序写入的特征
+/// NUS RX: central -> peripheral, write here.
 const NUS_RX_UUID: &str = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
-
-/// NUS TX: peripheral -> central，也就是本程序订阅通知的特征
+/// NUS TX: peripheral -> central, subscribe here.
 const NUS_TX_UUID: &str = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
 
-#[derive(Clone, Debug)]
-struct KnownUartService {
-    service_uuid: &'static str,
-    characteristic_uuids: &'static [&'static str],
+/// RSTerm example multi-UART service used by the ESP32-C3 sketch.
+const RSTERM_MULTI_UART_SERVICE_UUID: &str = "B7E40001-B5A3-F393-E0A9-E50E24DCCA9E";
+const RSTERM_UART0_TX_UUID: &str = "B7E40002-B5A3-F393-E0A9-E50E24DCCA9E";
+const RSTERM_UART0_RX_UUID: &str = "B7E40003-B5A3-F393-E0A9-E50E24DCCA9E";
+const RSTERM_UART1_TX_UUID: &str = "B7E40004-B5A3-F393-E0A9-E50E24DCCA9E";
+const RSTERM_UART1_RX_UUID: &str = "B7E40005-B5A3-F393-E0A9-E50E24DCCA9E";
+
+/// Optional future-proof mux profile: one TX/RX pair carries framed logical ports.
+/// Frame format: port:u8, type:u8, len:u16 little-endian, payload[len].
+const RSTERM_MUX_SERVICE_UUID: &str = "7A6E0001-B5A3-F393-E0A9-E50E24DCCA9E";
+const RSTERM_MUX_RX_UUID: &str = "7A6E0002-B5A3-F393-E0A9-E50E24DCCA9E";
+const RSTERM_MUX_TX_UUID: &str = "7A6E0003-B5A3-F393-E0A9-E50E24DCCA9E";
+const MUX_FRAME_DATA: u8 = 0x01;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BleProtocol {
+    MultiCharacteristic,
+    MuxFrames,
 }
 
-/// 已知的 UART 服务列表。
-///
-/// 注意：这里不强行假设 characteristic 的方向，而是用属性判断：
-/// - NOTIFY / INDICATE => 设备到电脑，作为 TX
-/// - WRITE / WRITE_WITHOUT_RESPONSE => 电脑到设备，作为 RX
-const KNOWN_UART_SERVICES: &[KnownUartService] = &[
-    // 1) Nordic UART Service
-    KnownUartService {
-        service_uuid: NUS_SERVICE_UUID,
-        characteristic_uuids: &[NUS_RX_UUID, NUS_TX_UUID],
+#[derive(Clone, Copy, Debug)]
+struct KnownPortPair {
+    port: u8,
+    name: &'static str,
+    kind: ConnectionPortKind,
+    tx_uuid: &'static str,
+    rx_uuid: &'static str,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct KnownBleProfile {
+    service_uuid: &'static str,
+    protocol: BleProtocol,
+    ports: &'static [KnownPortPair],
+}
+
+static RSTERM_MULTI_UART_PORTS: &[KnownPortPair] = &[
+    KnownPortPair {
+        port: 0,
+        name: "UART0",
+        kind: ConnectionPortKind::Serial,
+        tx_uuid: RSTERM_UART0_TX_UUID,
+        rx_uuid: RSTERM_UART0_RX_UUID,
     },
-    // 2) Texas Instruments / SimpleLink 风格
-    KnownUartService {
-        service_uuid: "FFF0",
-        characteristic_uuids: &["FFF1", "FFF2"],
-    },
-    // 3) HM-10 / JDY 等常见单特征串口
-    KnownUartService {
-        service_uuid: "FFE0",
-        characteristic_uuids: &["FFE1"],
-    },
-    // 4) Adafruit Bluefruit LE
-    KnownUartService {
-        service_uuid: "ADAFAF00-C464-4BDA-B3B2-2241514ADF3C",
-        characteristic_uuids: &[
-            "ADAFAF01-C464-4BDA-B3B2-2241514ADF3C",
-            "ADAFAF02-C464-4BDA-B3B2-2241514ADF3C",
-        ],
-    },
-    // 5) Serial Bluetooth Terminal 常见 DFBx 服务
-    KnownUartService {
-        service_uuid: "0000DFB0-0000-1000-8000-00805F9B34FB",
-        characteristic_uuids: &[
-            "0000DFB1-0000-1000-8000-00805F9B34FB",
-            "0000DFB2-0000-1000-8000-00805F9B34FB",
-        ],
+    KnownPortPair {
+        port: 1,
+        name: "UART1",
+        kind: ConnectionPortKind::Serial,
+        tx_uuid: RSTERM_UART1_TX_UUID,
+        rx_uuid: RSTERM_UART1_RX_UUID,
     },
 ];
 
-/// 自动发现的 UART 特征集合
+static RSTERM_MUX_PORTS: &[KnownPortPair] = &[KnownPortPair {
+    port: 0,
+    name: "MUX",
+    kind: ConnectionPortKind::Terminal,
+    tx_uuid: RSTERM_MUX_TX_UUID,
+    rx_uuid: RSTERM_MUX_RX_UUID,
+}];
+
+static NUS_PORTS: &[KnownPortPair] = &[KnownPortPair {
+    port: 0,
+    name: "NUS",
+    kind: ConnectionPortKind::Serial,
+    tx_uuid: NUS_TX_UUID,
+    rx_uuid: NUS_RX_UUID,
+}];
+
+static TI_PORTS: &[KnownPortPair] = &[KnownPortPair {
+    port: 0,
+    name: "TI UART",
+    kind: ConnectionPortKind::Serial,
+    tx_uuid: "FFF1",
+    rx_uuid: "FFF2",
+}];
+
+static HM10_PORTS: &[KnownPortPair] = &[KnownPortPair {
+    port: 0,
+    name: "HM-10",
+    kind: ConnectionPortKind::Serial,
+    tx_uuid: "FFE1",
+    rx_uuid: "FFE1",
+}];
+
+static ADAFRUIT_PORTS: &[KnownPortPair] = &[KnownPortPair {
+    port: 0,
+    name: "Bluefruit UART",
+    kind: ConnectionPortKind::Serial,
+    tx_uuid: "ADAFAF01-C464-4BDA-B3B2-2241514ADF3C",
+    rx_uuid: "ADAFAF02-C464-4BDA-B3B2-2241514ADF3C",
+}];
+
+static DFB_PORTS: &[KnownPortPair] = &[KnownPortPair {
+    port: 0,
+    name: "DFB UART",
+    kind: ConnectionPortKind::Serial,
+    tx_uuid: "0000DFB1-0000-1000-8000-00805F9B34FB",
+    rx_uuid: "0000DFB2-0000-1000-8000-00805F9B34FB",
+}];
+
+static KNOWN_BLE_PROFILES: &[KnownBleProfile] = &[
+    KnownBleProfile {
+        service_uuid: RSTERM_MULTI_UART_SERVICE_UUID,
+        protocol: BleProtocol::MultiCharacteristic,
+        ports: RSTERM_MULTI_UART_PORTS,
+    },
+    KnownBleProfile {
+        service_uuid: RSTERM_MUX_SERVICE_UUID,
+        protocol: BleProtocol::MuxFrames,
+        ports: RSTERM_MUX_PORTS,
+    },
+    KnownBleProfile {
+        service_uuid: NUS_SERVICE_UUID,
+        protocol: BleProtocol::MultiCharacteristic,
+        ports: NUS_PORTS,
+    },
+    KnownBleProfile {
+        service_uuid: "FFF0",
+        protocol: BleProtocol::MultiCharacteristic,
+        ports: TI_PORTS,
+    },
+    KnownBleProfile {
+        service_uuid: "FFE0",
+        protocol: BleProtocol::MultiCharacteristic,
+        ports: HM10_PORTS,
+    },
+    KnownBleProfile {
+        service_uuid: "ADAFAF00-C464-4BDA-B3B2-2241514ADF3C",
+        protocol: BleProtocol::MultiCharacteristic,
+        ports: ADAFRUIT_PORTS,
+    },
+    KnownBleProfile {
+        service_uuid: "0000DFB0-0000-1000-8000-00805F9B34FB",
+        protocol: BleProtocol::MultiCharacteristic,
+        ports: DFB_PORTS,
+    },
+];
+
 #[derive(Clone, Debug)]
-struct UartChars {
-    service_uuid: Uuid,
-
-    /// 设备 -> 本程序，Notify / Indicate
+struct BlePort {
+    info: ConnectionPort,
     tx: Characteristic,
-
-    /// 本程序 -> 设备，Write / WriteWithoutResponse
     rx: Characteristic,
+}
 
-    /// 可选的第二组通知特征
-    tx2: Option<Characteristic>,
+#[derive(Clone, Debug)]
+struct BleDiscovery {
+    service_uuid: Uuid,
+    protocol: BleProtocol,
+    ports: Vec<BlePort>,
 }
 
 // ---------------------------------------------------------------------------
-// 通用发现逻辑
+// UUID / characteristic helpers
 // ---------------------------------------------------------------------------
 
 fn parse_ble_uuid(s: &str) -> Option<Uuid> {
     let s = s.trim();
-
     match s.len() {
-        // 16-bit UUID，例如 FFF0 => 0000FFF0-0000-1000-8000-00805F9B34FB
-        4 => Uuid::parse_str(&format!(
-            "0000{s}-0000-1000-8000-00805F9B34FB"
-        ))
-        .ok(),
-
-        // 32-bit UUID，例如 12345678 => 12345678-0000-1000-8000-00805F9B34FB
-        8 => Uuid::parse_str(&format!(
-            "{s}-0000-1000-8000-00805F9B34FB"
-        ))
-        .ok(),
-
-        // 完整 UUID
+        4 => Uuid::parse_str(&format!("0000{s}-0000-1000-8000-00805F9B34FB")).ok(),
+        8 => Uuid::parse_str(&format!("{s}-0000-1000-8000-00805F9B34FB")).ok(),
         _ => Uuid::parse_str(s).ok(),
     }
 }
@@ -143,23 +223,95 @@ fn prefer_write_score(c: &Characteristic) -> u8 {
     }
 }
 
-/// 从一组 characteristic 中推断 UART 的 TX/RX。
-///
-/// 优先选择：
-/// - TX: NOTIFY 优先于 INDICATE
-/// - RX: WRITE_WITHOUT_RESPONSE 优先于 WRITE
-/// - 如果存在独立的 TX/RX 特征，优先使用两个不同特征
-/// - 如果只有一个同时支持 Notify + Write 的特征，也允许复用同一个特征
-fn build_uart_from_chars(service_uuid: Uuid, chars: &[Characteristic]) -> Option<UartChars> {
-    let mut tx_candidates: Vec<Characteristic> = chars
+fn write_type_for(rx: &Characteristic) -> WriteType {
+    if rx
+        .properties
+        .contains(CharPropFlags::WRITE_WITHOUT_RESPONSE)
+    {
+        WriteType::WithoutResponse
+    } else {
+        WriteType::WithResponse
+    }
+}
+
+fn port_for_notification_uuid(ports: &[BlePort], uuid: Uuid) -> Option<u8> {
+    ports
         .iter()
-        .filter(|c| is_notifiable(*c))
+        .find(|port| port.tx.uuid == uuid)
+        .map(|port| port.info.port)
+}
+
+fn find_port(ports: &[BlePort], port: u8) -> Option<&BlePort> {
+    ports.iter().find(|p| p.info.port == port)
+}
+
+fn advertised_ports(ports: &[BlePort]) -> Vec<ConnectionPort> {
+    ports.iter().map(|p| p.info.clone()).collect()
+}
+
+// ---------------------------------------------------------------------------
+// Discovery
+// ---------------------------------------------------------------------------
+
+fn build_from_known_profile(service: &Service, profile: KnownBleProfile) -> Option<BleDiscovery> {
+    let mut ports = Vec::new();
+
+    for pair in profile.ports {
+        let Some(tx_uuid) = parse_ble_uuid(pair.tx_uuid) else {
+            continue;
+        };
+        let Some(rx_uuid) = parse_ble_uuid(pair.rx_uuid) else {
+            continue;
+        };
+
+        let tx = service
+            .characteristics
+            .iter()
+            .find(|c| c.uuid == tx_uuid && is_notifiable(c))
+            .cloned();
+        let rx = service
+            .characteristics
+            .iter()
+            .find(|c| c.uuid == rx_uuid && is_writable(c))
+            .cloned();
+
+        if let (Some(tx), Some(rx)) = (tx, rx) {
+            ports.push(BlePort {
+                info: ConnectionPort {
+                    port: pair.port,
+                    name: pair.name.to_string(),
+                    kind: pair.kind,
+                    read_only: false,
+                    write_only: false,
+                },
+                tx,
+                rx,
+            });
+        }
+    }
+
+    if ports.is_empty() {
+        None
+    } else {
+        Some(BleDiscovery {
+            service_uuid: service.uuid,
+            protocol: profile.protocol,
+            ports,
+        })
+    }
+}
+
+fn build_from_properties(service: &Service, max_ports: usize) -> Option<BleDiscovery> {
+    let mut tx_candidates: Vec<Characteristic> = service
+        .characteristics
+        .iter()
+        .filter(|c| is_notifiable(c))
         .cloned()
         .collect();
-
-    let mut rx_candidates: Vec<Characteristic> = chars
+    let mut rx_candidates: Vec<Characteristic> = service
+        .characteristics
         .iter()
-        .filter(|c| is_writable(*c))
+        .filter(|c| is_writable(c))
         .cloned()
         .collect();
 
@@ -167,107 +319,137 @@ fn build_uart_from_chars(service_uuid: Uuid, chars: &[Characteristic]) -> Option
         return None;
     }
 
-    tx_candidates.sort_by_key(prefer_notify_score);
-    rx_candidates.sort_by_key(prefer_write_score);
+    tx_candidates.sort_by_key(|c| (prefer_notify_score(c), c.uuid.as_u128()));
+    rx_candidates.sort_by_key(|c| (prefer_write_score(c), c.uuid.as_u128()));
 
-    // 优先找两个不同的 characteristic
-    for tx in &tx_candidates {
-        for rx in &rx_candidates {
-            if tx.uuid != rx.uuid {
-                let tx2 = tx_candidates
-                    .iter()
-                    .find(|other| other.uuid != tx.uuid)
-                    .cloned();
+    let mut used_tx = BTreeSet::new();
+    let mut used_rx = BTreeSet::new();
+    let mut ports = Vec::new();
 
-                return Some(UartChars {
-                    service_uuid,
-                    tx: tx.clone(),
-                    rx: rx.clone(),
-                    tx2,
-                });
-            }
+    for tx in tx_candidates.iter() {
+        if ports.len() >= max_ports {
+            break;
         }
-    }
+        if used_tx.contains(&tx.uuid) {
+            continue;
+        }
 
-    // 如果只有一个同时支持 Notify + Write 的 characteristic，也允许使用
-    let tx = tx_candidates[0].clone();
-    let rx = rx_candidates[0].clone();
+        let rx = rx_candidates
+            .iter()
+            .find(|rx| !used_rx.contains(&rx.uuid) && rx.uuid != tx.uuid)
+            .or_else(|| {
+                rx_candidates
+                    .iter()
+                    .find(|rx| !used_rx.contains(&rx.uuid) && rx.uuid == tx.uuid)
+            });
 
-    Some(UartChars {
-        service_uuid,
-        tx,
-        rx,
-        tx2: None,
-    })
-}
-
-/// 尝试按已知 UUID 表匹配 UART 服务。
-fn match_known_service(services: &BTreeSet<Service>) -> Option<UartChars> {
-    for known in KNOWN_UART_SERVICES {
-        let Some(service_uuid) = parse_ble_uuid(known.service_uuid) else {
+        let Some(rx) = rx else {
             continue;
         };
 
+        used_tx.insert(tx.uuid);
+        used_rx.insert(rx.uuid);
+
+        let port = ports.len() as u8;
+        ports.push(BlePort {
+            info: ConnectionPort::serial(port, format!("BLE port {port}")),
+            tx: tx.clone(),
+            rx: rx.clone(),
+        });
+    }
+
+    if ports.is_empty() {
+        None
+    } else {
+        Some(BleDiscovery {
+            service_uuid: service.uuid,
+            protocol: BleProtocol::MultiCharacteristic,
+            ports,
+        })
+    }
+}
+
+fn discover_uart(services: &BTreeSet<Service>) -> Option<BleDiscovery> {
+    for profile in KNOWN_BLE_PROFILES {
+        let Some(service_uuid) = parse_ble_uuid(profile.service_uuid) else {
+            continue;
+        };
         let Some(service) = services.iter().find(|s| s.uuid == service_uuid) else {
             continue;
         };
 
-        let known_char_uuids: Vec<Uuid> = known
-            .characteristic_uuids
-            .iter()
-            .filter_map(|s| parse_ble_uuid(s))
-            .collect();
-
-        let known_chars: Vec<Characteristic> = service
-            .characteristics
-            .iter()
-            .filter(|c| known_char_uuids.contains(&c.uuid))
-            .cloned()
-            .collect();
-
-        // 先只用已知 characteristic UUID 匹配
-        if let Some(uart) = build_uart_from_chars(service.uuid, &known_chars) {
-            return Some(uart);
+        if let Some(discovery) = build_from_known_profile(service, *profile) {
+            return Some(discovery);
         }
 
-        // 如果服务 UUID 是已知的，但 characteristic UUID 表不完整，
-        // 则在该服务内按属性自动猜测一次。
-        let all_chars: Vec<Characteristic> =
-            service.characteristics.iter().cloned().collect();
-
-        if let Some(uart) = build_uart_from_chars(service.uuid, &all_chars) {
-            return Some(uart);
+        if profile.protocol == BleProtocol::MultiCharacteristic {
+            if let Some(discovery) = build_from_properties(service, 8) {
+                return Some(discovery);
+            }
         }
     }
 
-    None
-}
-
-/// 遍历所有服务，自动猜测哪一组特征是 UART 串口。
-fn auto_discover_uart(services: &BTreeSet<Service>) -> Option<UartChars> {
-    let mut candidates: Vec<UartChars> = Vec::new();
-
+    let mut candidates = Vec::new();
     for service in services {
-        let chars: Vec<Characteristic> = service.characteristics.iter().cloned().collect();
-
-        if let Some(uart) = build_uart_from_chars(service.uuid, &chars) {
-            candidates.push(uart);
+        if let Some(discovery) = build_from_properties(service, 8) {
+            candidates.push(discovery);
         }
     }
 
-    candidates.sort_by_key(|c| {
+    candidates.sort_by_key(|d| {
+        let first = &d.ports[0];
         (
-            prefer_write_score(&c.rx),
-            prefer_notify_score(&c.tx),
+            d.ports.len() == 1,
+            prefer_write_score(&first.rx),
+            prefer_notify_score(&first.tx),
+            d.service_uuid.as_u128(),
         )
     });
 
     candidates.into_iter().next()
 }
 
-/// 综合入口：先查已知表，失败则自动发现。
-fn discover_uart(services: &BTreeSet<Service>) -> Option<UartChars> {
-    match_known_service(services).or_else(|| auto_discover_uart(services))
+// ---------------------------------------------------------------------------
+// Optional RSTerm mux frame support
+// ---------------------------------------------------------------------------
+
+#[derive(Default)]
+struct MuxDecoder {
+    buffer: Vec<u8>,
+}
+
+impl MuxDecoder {
+    fn push(&mut self, bytes: &[u8]) -> Vec<(u8, u8, Vec<u8>)> {
+        self.buffer.extend_from_slice(bytes);
+        let mut frames = Vec::new();
+
+        loop {
+            if self.buffer.len() < 4 {
+                break;
+            }
+            let port = self.buffer[0];
+            let frame_type = self.buffer[1];
+            let len = u16::from_le_bytes([self.buffer[2], self.buffer[3]]) as usize;
+            if self.buffer.len() < 4 + len {
+                break;
+            }
+            let payload = self.buffer[4..4 + len].to_vec();
+            self.buffer.drain(0..4 + len);
+            frames.push((port, frame_type, payload));
+        }
+
+        frames
+    }
+}
+
+fn encode_mux_frame(port: u8, frame_type: u8, payload: &[u8]) -> Vec<u8> {
+    let len = payload.len().min(u16::MAX as usize);
+    let mut out = Vec::with_capacity(4 + len);
+    out.push(port);
+    out.push(frame_type);
+    out.extend_from_slice(&(len as u16).to_le_bytes());
+    out.extend_from_slice(&payload[..len]);
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -281,32 +463,61 @@ async fn find_peripheral_by_name(
     for p in peripherals {
         if let Ok(Some(props)) = p.properties().await {
             if let Some(ref name) = props.local_name {
-                if name == target_name {
+                if name == target_name || name.contains(target_name) {
                     return Some(p.clone());
                 }
             }
         }
     }
-
     None
 }
 
-async fn close_ble_connection(
-    peripheral: &btleplug::platform::Peripheral,
-    uart_tx: &Characteristic,
-    uart_tx2: &Option<Characteristic>,
-) {
-    let _ = peripheral.unsubscribe(uart_tx).await;
-
-    if let Some(tx2) = uart_tx2 {
-        let _ = peripheral.unsubscribe(tx2).await;
+async fn close_ble_connection(peripheral: &btleplug::platform::Peripheral, ports: &[BlePort]) {
+    let mut unsubscribed = BTreeSet::new();
+    for port in ports {
+        if unsubscribed.insert(port.tx.uuid) {
+            let _ = peripheral.unsubscribe(&port.tx).await;
+        }
     }
-
     let _ = peripheral.disconnect().await;
 }
 
+async fn write_raw_port(
+    peripheral: &btleplug::platform::Peripheral,
+    port: &BlePort,
+    data: &[u8],
+    max_payload_len: usize,
+) -> Result<(), String> {
+    let write_type = write_type_for(&port.rx);
+    for chunk in data.chunks(max_payload_len) {
+        peripheral
+            .write(&port.rx, chunk, write_type)
+            .await
+            .map_err(|e| e.to_string())?;
+        if write_type == WriteType::WithoutResponse {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    }
+    Ok(())
+}
+
+async fn write_mux_port(
+    peripheral: &btleplug::platform::Peripheral,
+    mux_port: &BlePort,
+    logical_port: u8,
+    data: &[u8],
+    max_payload_len: usize,
+) -> Result<(), String> {
+    let payload_len = max_payload_len.saturating_sub(4).max(1);
+    for chunk in data.chunks(payload_len) {
+        let frame = encode_mux_frame(logical_port, MUX_FRAME_DATA, chunk);
+        write_raw_port(peripheral, mux_port, &frame, max_payload_len).await?;
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
-// 公共入口 — 建立 BLE 串口连接
+// Public entry — connect BLE terminal transport
 // ---------------------------------------------------------------------------
 
 pub fn connect_ble(config: &SavedConnection) -> Result<ConnectionHandle, String> {
@@ -322,7 +533,6 @@ pub fn connect_ble(config: &SavedConnection) -> Result<ConnectionHandle, String>
     let repaint = RepaintNotifier::default();
     let repaint_reader = repaint.clone();
 
-    // ---- 主 I/O 线程：运行 Tokio runtime，同时处理读写 ----
     let reader_thread = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -330,13 +540,10 @@ pub fn connect_ble(config: &SavedConnection) -> Result<ConnectionHandle, String>
             .expect("Failed to build tokio runtime");
 
         rt.block_on(async move {
-            // 1. Manager & Adapter -------------------------------------------
             let manager = match Manager::new().await {
                 Ok(m) => m,
                 Err(e) => {
-                    let _ = from_tx.send(ConnIn::StateChanged(
-                        ConnectionState::Error(e.to_string()),
-                    ));
+                    let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(e.to_string())));
                     return;
                 }
             };
@@ -344,9 +551,7 @@ pub fn connect_ble(config: &SavedConnection) -> Result<ConnectionHandle, String>
             let adapters = match manager.adapters().await {
                 Ok(a) => a,
                 Err(e) => {
-                    let _ = from_tx.send(ConnIn::StateChanged(
-                        ConnectionState::Error(e.to_string()),
-                    ));
+                    let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(e.to_string())));
                     return;
                 }
             };
@@ -354,20 +559,17 @@ pub fn connect_ble(config: &SavedConnection) -> Result<ConnectionHandle, String>
             let adapter = match adapters.into_iter().next() {
                 Some(a) => a,
                 None => {
-                    let _ = from_tx.send(ConnIn::StateChanged(
-                        ConnectionState::Error("No BLE adapter found".to_string()),
-                    ));
+                    let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(
+                        "No BLE adapter found".to_string(),
+                    )));
                     return;
                 }
             };
 
             let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Connecting));
 
-            // 2. 扫描 -------------------------------------------------------
             if let Err(e) = adapter.start_scan(ScanFilter::default()).await {
-                let _ = from_tx.send(ConnIn::StateChanged(
-                    ConnectionState::Error(e.to_string()),
-                ));
+                let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(e.to_string())));
                 return;
             }
 
@@ -377,112 +579,93 @@ pub fn connect_ble(config: &SavedConnection) -> Result<ConnectionHandle, String>
                 Ok(p) => p,
                 Err(e) => {
                     let _ = adapter.stop_scan().await;
-                    let _ = from_tx.send(ConnIn::StateChanged(
-                        ConnectionState::Error(e.to_string()),
-                    ));
+                    let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(e.to_string())));
                     return;
                 }
             };
 
             let _ = adapter.stop_scan().await;
 
-            // 3. 按名称查找目标设备 ------------------------------------------
             let peripheral = match find_peripheral_by_name(&peripherals, &device_name).await {
                 Some(p) => p,
                 None => {
-                    let _ = from_tx.send(ConnIn::StateChanged(
-                        ConnectionState::Error(format!(
-                            "BLE device '{device_name}' not found. \
-                             Ensure it is powered on and advertising."
-                        )),
-                    ));
+                    let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(format!(
+                        "BLE device '{device_name}' not found. Ensure it is powered on and advertising."
+                    ))));
                     return;
                 }
             };
 
-            // 4. 连接 -------------------------------------------------------
             if let Err(e) = peripheral.connect().await {
-                let _ = from_tx.send(ConnIn::StateChanged(
-                    ConnectionState::Error(format!(
-                        "Failed to connect to '{device_name}': {e}"
-                    )),
-                ));
+                let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(format!(
+                    "Failed to connect to '{device_name}': {e}"
+                ))));
                 return;
             }
 
-            // 5. 发现服务 ---------------------------------------------------
             if let Err(e) = peripheral.discover_services().await {
-                let _ = from_tx.send(ConnIn::StateChanged(
-                    ConnectionState::Error(e.to_string()),
-                ));
+                let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(e.to_string())));
                 let _ = peripheral.disconnect().await;
                 return;
             }
 
             let services = peripheral.services();
-
-            let uart = match discover_uart(&services) {
-                Some(u) => u,
+            let discovery = match discover_uart(&services) {
+                Some(d) => d,
                 None => {
-                    let msg = "Could not find a suitable UART service on this device.\n\
-                               The device must expose at least one characteristic with \
-                               NOTIFY/INDICATE and one with WRITE/WRITE_WITHOUT_RESPONSE."
+                    let msg = "Could not find a suitable BLE terminal/UART service on this device.\n\
+                               A compatible device must expose Notify/Indicate + Write characteristics,\n\
+                               or the RSTerm BLE MUX profile."
                         .to_string();
-
-                    let _ = from_tx.send(ConnIn::StateChanged(
-                        ConnectionState::Error(msg),
-                    ));
+                    let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(msg)));
                     let _ = peripheral.disconnect().await;
                     return;
                 }
             };
 
             log::info!(
-                "BLE UART discovered: service={}, tx={}, rx={}, tx2={:?}",
-                uart.service_uuid,
-                uart.tx.uuid,
-                uart.rx.uuid,
-                uart.tx2.as_ref().map(|c| c.uuid),
+                "BLE transport discovered: service={}, protocol={:?}, ports={}",
+                discovery.service_uuid,
+                discovery.protocol,
+                discovery.ports.len(),
             );
+            for port in &discovery.ports {
+                log::info!(
+                    "BLE port {}: {} tx={} rx={} write={:?}",
+                    port.info.port,
+                    port.info.name,
+                    port.tx.uuid,
+                    port.rx.uuid,
+                    write_type_for(&port.rx),
+                );
+            }
 
-            // 6. 先获取通知流，再订阅通知，减少漏首包风险 -----------------------
             let mut notifications = match peripheral.notifications().await {
                 Ok(s) => s,
                 Err(e) => {
-                    let _ = from_tx.send(ConnIn::StateChanged(
-                        ConnectionState::Error(e.to_string()),
-                    ));
+                    let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(e.to_string())));
                     let _ = peripheral.disconnect().await;
                     return;
                 }
             };
 
-            if let Err(e) = peripheral.subscribe(&uart.tx).await {
-                let _ = from_tx.send(ConnIn::StateChanged(
-                    ConnectionState::Error(format!(
-                        "Failed to subscribe to TX notifications: {e}"
-                    )),
-                ));
-                let _ = peripheral.disconnect().await;
-                return;
-            }
-
-            if let Some(ref tx2) = uart.tx2 {
-                if let Err(e) = peripheral.subscribe(tx2).await {
-                    log::warn!(
-                        "Failed to subscribe to secondary TX notifications: {e}"
-                    );
+            for port in &discovery.ports {
+                if let Err(e) = peripheral.subscribe(&port.tx).await {
+                    let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(format!(
+                        "Failed to subscribe to BLE port {} notifications: {e}",
+                        port.info.port,
+                    ))));
+                    let _ = peripheral.disconnect().await;
+                    return;
                 }
             }
 
+            emit_conn_ports_changed(&from_tx, &repaint_reader, advertised_ports(&discovery.ports));
             let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Connected));
 
-            // 7. 写通道桥接：std::mpsc -> tokio::mpsc ------------------------
             let (internal_write_tx, mut internal_write_rx) =
                 tokio::sync::mpsc::channel::<ConnOut>(256);
-
             let write_tx_for_task = internal_write_tx.clone();
-
             tokio::task::spawn_blocking(move || {
                 while let Ok(msg) = to_conn_rx.recv() {
                     if write_tx_for_task.blocking_send(msg).is_err() {
@@ -490,114 +673,114 @@ pub fn connect_ble(config: &SavedConnection) -> Result<ConnectionHandle, String>
                     }
                 }
             });
-
-            // 丢掉当前 async 任务里的 sender。
-            // 这样当外部 to_conn_rx 关闭、桥接任务退出后，
-            // internal_write_rx.recv() 能正确返回 None。
             drop(internal_write_tx);
 
-            // 8. 写模式：优先 WithoutResponse 以获得更高吞吐 ------------------
-            let write_type = if uart
-                .rx
-                .properties
-                .contains(CharPropFlags::WRITE_WITHOUT_RESPONSE)
-            {
-                WriteType::WithoutResponse
-            } else {
-                WriteType::WithResponse
-            };
+            let protocol = discovery.protocol;
+            let ports = discovery.ports.clone();
+            let max_payload_len = peripheral.mtu().saturating_sub(3).max(20) as usize;
+            let mut mux_decoder = MuxDecoder::default();
 
-            let uart_rx = uart.rx.clone();
-            let uart_tx = uart.tx.clone();
-            let uart_tx2 = uart.tx2.clone();
-
-            // BLE ATT 有 3 字节头部，单包 payload 通常为 MTU - 3。
-            // 如果平台暂时返回很小的 MTU，至少按 20 字节保守分片。
-            let max_payload_len = peripheral.mtu().saturating_sub(3).max(20);
-
-            log::info!(
-                "BLE write mode={:?}, mtu={}, max_payload_len={}",
-                write_type,
-                peripheral.mtu(),
-                max_payload_len,
-            );
-
-            // 9. 主事件循环 --------------------------------------------------
             loop {
                 tokio::select! {
-                    // ---- 读路径：BLE 通知 -> ConnIn::Data ----
                     notification = notifications.next() => {
                         let Some(notification) = notification else {
-                            let _ = from_tx.send(
-                                ConnIn::StateChanged(ConnectionState::Lost(
-                                    "BLE notification stream ended".to_string(),
-                                )),
-                            );
+                            let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Lost(
+                                "BLE notification stream ended".to_string(),
+                            )));
                             let _ = peripheral.disconnect().await;
                             return;
                         };
 
-                        let is_primary = notification.uuid == uart_tx.uuid;
-                        let is_secondary = uart_tx2
-                            .as_ref()
-                            .map_or(false, |tx2| notification.uuid == tx2.uuid);
-
-                        if is_primary || is_secondary {
-                            emit_conn_data(
-                                &from_tx,
-                                &repaint_reader,
-                                notification.value,
-                            );
+                        match protocol {
+                            BleProtocol::MultiCharacteristic => {
+                                if let Some(port) = port_for_notification_uuid(&ports, notification.uuid) {
+                                    emit_conn_port_data(
+                                        &from_tx,
+                                        &repaint_reader,
+                                        port,
+                                        notification.value,
+                                    );
+                                }
+                            }
+                            BleProtocol::MuxFrames => {
+                                for (port, frame_type, payload) in mux_decoder.push(&notification.value) {
+                                    if frame_type == MUX_FRAME_DATA {
+                                        emit_conn_port_data(
+                                            &from_tx,
+                                            &repaint_reader,
+                                            port,
+                                            payload,
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
 
-                    // ---- 写路径：ConnOut::Data -> BLE RX 特征 ----
                     msg = internal_write_rx.recv() => {
                         match msg {
                             Some(ConnOut::Data(data)) => {
-                                for chunk in data.chunks(max_payload_len.into()) {
-                                    if let Err(e) = peripheral
-                                        .write(&uart_rx, chunk, write_type)
-                                        .await
-                                    {
-                                        log::warn!("BLE write error: {e}");
+                                let port = find_port(&ports, 0);
+                                let Some(port0) = port else {
+                                    let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(
+                                        "BLE port 0 is not available".to_string(),
+                                    )));
+                                    continue;
+                                };
 
-                                        let _ = from_tx.send(
-                                            ConnIn::StateChanged(
-                                                ConnectionState::Lost(e.to_string()),
-                                            ),
-                                        );
-
-                                        let _ = peripheral.disconnect().await;
-                                        return;
+                                let result = match protocol {
+                                    BleProtocol::MultiCharacteristic => {
+                                        write_raw_port(&peripheral, port0, &data, max_payload_len).await
                                     }
-
-                                    // WithoutResponse 没有确认/背压。
-                                    // 给设备一点处理时间，避免大粘贴时压爆外围设备缓冲区。
-                                    if write_type == WriteType::WithoutResponse {
-                                        tokio::time::sleep(
-                                            Duration::from_millis(2)
-                                        ).await;
+                                    BleProtocol::MuxFrames => {
+                                        write_mux_port(&peripheral, port0, 0, &data, max_payload_len).await
                                     }
+                                };
+
+                                if let Err(e) = result {
+                                    let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Lost(e)));
+                                    let _ = peripheral.disconnect().await;
+                                    return;
+                                }
+                            }
+
+                            Some(ConnOut::PortData { port, data }) => {
+                                let result = match protocol {
+                                    BleProtocol::MultiCharacteristic => {
+                                        let Some(uart_port) = find_port(&ports, port) else {
+                                            let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(format!(
+                                                "BLE port {port} is not available"
+                                            ))));
+                                            continue;
+                                        };
+                                        write_raw_port(&peripheral, uart_port, &data, max_payload_len).await
+                                    }
+                                    BleProtocol::MuxFrames => {
+                                        let Some(mux_port) = find_port(&ports, 0) else {
+                                            let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(
+                                                "BLE MUX write port is not available".to_string(),
+                                            )));
+                                            continue;
+                                        };
+                                        write_mux_port(&peripheral, mux_port, port, &data, max_payload_len).await
+                                    }
+                                };
+
+                                if let Err(e) = result {
+                                    let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Lost(e)));
+                                    let _ = peripheral.disconnect().await;
+                                    return;
                                 }
                             }
 
                             Some(ConnOut::Close) | None => {
-                                close_ble_connection(
-                                    &peripheral,
-                                    &uart_tx,
-                                    &uart_tx2,
-                                ).await;
-
-                                let _ = from_tx.send(
-                                    ConnIn::StateChanged(ConnectionState::Closed),
-                                );
-
+                                close_ble_connection(&peripheral, &ports).await;
+                                let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Closed));
                                 return;
                             }
 
                             Some(ConnOut::Resize(_, _)) | Some(ConnOut::Winch) => {
-                                // BLE 串口无需处理窗口尺寸变化
+                                // BLE terminal transports do not have a PTY window size by default.
                             }
                         }
                     }
@@ -606,7 +789,6 @@ pub fn connect_ble(config: &SavedConnection) -> Result<ConnectionHandle, String>
         });
     });
 
-    // writer_thread 是虚设的：所有写入在 reader_thread 的异步事件循环中完成。
     let writer_thread = std::thread::spawn(|| {});
 
     Ok(ConnectionHandle::new(

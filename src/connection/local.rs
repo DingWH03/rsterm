@@ -141,7 +141,7 @@ pub fn connect_local(
                 Err(mpsc::RecvTimeoutError::Disconnected) => return,
             }
             match to_conn_rx.recv_timeout(Duration::from_millis(10)) {
-                Ok(ConnOut::Data(data)) => {
+                Ok(ConnOut::Data(data)) | Ok(ConnOut::PortData { port: 0, data }) => {
                     if writer.write_all(&data).is_err() {
                         let _ = writer_from_tx.send(ConnIn::StateChanged(ConnectionState::Lost(
                             "Connection lost.".into(),
@@ -149,6 +149,9 @@ pub fn connect_local(
                         return;
                     }
                     let _ = writer.flush();
+                }
+                Ok(ConnOut::PortData { .. }) => {
+                    // Non-multiplexed PTY connections only expose port 0.
                 }
                 Ok(ConnOut::Resize(rows, cols)) => {
                     apply_pty_resize(&*master, rows, cols, shell_pid);

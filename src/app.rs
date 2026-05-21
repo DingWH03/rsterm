@@ -176,7 +176,7 @@ impl RstermApp {
         let font_gen = fonts::font_generation();
         for session in &mut self.sessions {
             if let WorkspaceSession::Terminal(term) = session {
-                term.row_galley_cache.clear();
+                term.clear_all_galley_caches();
                 term.font_generation = font_gen;
             }
         }
@@ -337,6 +337,11 @@ impl RstermApp {
             user_at_host,
             handle,
             terminal,
+            active_port: 0,
+            ports: Vec::new(),
+            inactive_port_states: Default::default(),
+            port_unread: Default::default(),
+            scrollback_lines,
             scroll_offset: 0,
             selection: None,
             selection_pointer: None,

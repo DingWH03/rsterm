@@ -1,14 +1,15 @@
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use crate::config::{CursorStyle, TerminalTheme};
-use crate::connection::{ConnIn, ConnectionState};
+use crate::connection::{ConnIn, ConnectionPort, ConnectionPortKind, ConnectionState};
 use crate::platform::{foreground_command, title_is_idle_host, truncate_label};
 use crate::storage::types::ConnectionType;
 use crate::terminal::parser::TermEvent;
 use crate::fonts;
 use crate::terminal::cursor::paint_cursor;
 use crate::terminal::metrics::measure_cell;
-use crate::terminal::{DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS};
+use crate::terminal::{Terminal, DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS};
 use crate::ui::terminal_grid::{apply_resize, drain_after_resize};
 use crate::ui::clipboard::{read_text, write_text};
 use crate::ui::keyboard::VirtualKeyboard;
@@ -23,6 +24,44 @@ use crate::ui::terminal_mouse::{process_terminal_mouse, process_terminal_wheel};
 use crate::ui::terminal_selection::{
     CellPos, TerminalSelection, paint_selection, paste_payload, update_terminal_selection,
 };
+
+pub struct PortUiState {
+    pub port: u8,
+    pub label: String,
+    pub kind: ConnectionPortKind,
+    pub terminal: Terminal,
+    pub scroll_offset: usize,
+    pub selection: Option<TerminalSelection>,
+    pub selection_pointer: Option<CellPos>,
+    pub row_galley_cache: RowGalleyCache,
+    pub mouse_motion_last: Option<(usize, usize)>,
+}
+
+impl PortUiState {
+    fn new(
+        port: u8,
+        label: impl Into<String>,
+        kind: ConnectionPortKind,
+        rows: usize,
+        cols: usize,
+        scrollback_lines: usize,
+    ) -> Self {
+        let mut terminal = Terminal::new(rows.max(1), cols.max(1));
+        terminal.set_scrollback_limit(scrollback_lines);
+        Self {
+            port,
+            label: label.into(),
+            kind,
+            terminal,
+            scroll_offset: 0,
+            selection: None,
+            selection_pointer: None,
+            row_galley_cache: Default::default(),
+            mouse_motion_last: None,
+        }
+    }
+}
+
 pub struct ActiveSession {
     pub id: String,
     pub conn_type: ConnectionType,
@@ -35,7 +74,16 @@ pub struct ActiveSession {
     /// Idle tab label for local / SSH (`user@host`).
     pub user_at_host: String,
     pub handle: crate::connection::ConnectionHandle,
-    pub terminal: crate::terminal::Terminal,
+    pub terminal: Terminal,
+    /// Active logical port for multiplexed transports such as BLE multi-UART.
+    pub active_port: u8,
+    /// Ports advertised by the transport. Empty means classic single-stream connection.
+    pub ports: Vec<ConnectionPort>,
+    /// Terminal state for non-active ports. The active port stays in `terminal` and related fields.
+    pub inactive_port_states: BTreeMap<u8, PortUiState>,
+    /// Byte counters for ports that received data while inactive.
+    pub port_unread: BTreeMap<u8, usize>,
+    pub scrollback_lines: usize,
     pub scroll_offset: usize,
     pub selection: Option<TerminalSelection>,
     pub selection_pointer: Option<CellPos>,
@@ -71,6 +119,130 @@ pub enum ConnectionViewAction {
 }
 
 impl ActiveSession {
+    fn port_info(&self, port: u8) -> Option<&ConnectionPort> {
+        self.ports.iter().find(|p| p.port == port)
+    }
+
+    fn port_label(&self, port: u8) -> String {
+        self.port_info(port)
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| format!("Port {port}"))
+    }
+
+    fn port_kind(&self, port: u8) -> ConnectionPortKind {
+        self.port_info(port)
+            .map(|p| p.kind)
+            .unwrap_or(ConnectionPortKind::Unknown)
+    }
+
+    fn blank_port_state(&self, port: u8) -> PortUiState {
+        PortUiState::new(
+            port,
+            self.port_label(port),
+            self.port_kind(port),
+            self.grid_rows,
+            self.grid_cols,
+            self.scrollback_lines,
+        )
+    }
+
+    fn take_current_port_state(&mut self) -> PortUiState {
+        let mut placeholder = Terminal::new(self.grid_rows.max(1), self.grid_cols.max(1));
+        placeholder.set_scrollback_limit(self.scrollback_lines);
+        PortUiState {
+            port: self.active_port,
+            label: self.port_label(self.active_port),
+            kind: self.port_kind(self.active_port),
+            terminal: std::mem::replace(&mut self.terminal, placeholder),
+            scroll_offset: self.scroll_offset,
+            selection: self.selection.take(),
+            selection_pointer: self.selection_pointer.take(),
+            row_galley_cache: std::mem::take(&mut self.row_galley_cache),
+            mouse_motion_last: self.mouse_motion_last.take(),
+        }
+    }
+
+    fn restore_port_state(&mut self, state: PortUiState) {
+        self.active_port = state.port;
+        self.terminal = state.terminal;
+        self.scroll_offset = state.scroll_offset;
+        self.selection = state.selection;
+        self.selection_pointer = state.selection_pointer;
+        self.row_galley_cache = state.row_galley_cache;
+        self.mouse_motion_last = state.mouse_motion_last;
+        self.port_unread.remove(&self.active_port);
+    }
+
+    pub fn set_connection_ports(&mut self, ports: Vec<ConnectionPort>) {
+        if ports.is_empty() {
+            return;
+        }
+        self.ports = ports;
+        if !self.ports.iter().any(|p| p.port == self.active_port) {
+            let next = self.ports[0].port;
+            self.switch_to_port(next);
+        }
+        let known: Vec<u8> = self.ports.iter().map(|p| p.port).collect();
+        self.inactive_port_states
+            .retain(|port, _| known.contains(port));
+    }
+
+    fn ensure_port_known(&mut self, port: u8) {
+        if self.ports.iter().any(|p| p.port == port) {
+            return;
+        }
+        self.ports.push(ConnectionPort {
+            port,
+            name: format!("Port {port}"),
+            kind: ConnectionPortKind::Unknown,
+            read_only: false,
+            write_only: false,
+        });
+        self.ports.sort_by_key(|p| p.port);
+    }
+
+    pub fn switch_to_port(&mut self, port: u8) {
+        if port == self.active_port {
+            self.port_unread.remove(&port);
+            return;
+        }
+        self.ensure_port_known(port);
+        let current = self.take_current_port_state();
+        self.inactive_port_states.insert(current.port, current);
+        let next = self
+            .inactive_port_states
+            .remove(&port)
+            .unwrap_or_else(|| self.blank_port_state(port));
+        self.restore_port_state(next);
+    }
+
+    pub fn receive_inactive_port_data(&mut self, port: u8, data: &[u8]) {
+        self.ensure_port_known(port);
+        if !self.inactive_port_states.contains_key(&port) {
+            let state = self.blank_port_state(port);
+            self.inactive_port_states.insert(port, state);
+        }
+        if let Some(state) = self.inactive_port_states.get_mut(&port) {
+            state.terminal.write(data);
+        }
+        *self.port_unread.entry(port).or_insert(0) += data.len();
+    }
+
+    pub fn send_active(&self, data: Vec<u8>) {
+        if self.ports.is_empty() {
+            self.handle.send(data);
+        } else {
+            self.handle.send_to_port(self.active_port, data);
+        }
+    }
+
+    pub fn clear_all_galley_caches(&mut self) {
+        self.row_galley_cache.clear();
+        for state in self.inactive_port_states.values_mut() {
+            state.row_galley_cache.clear();
+        }
+    }
+
     /// Sidebar tab: serial/BLE → connection name; local/SSH → running command or `user@host`.
     pub fn tab_label(&self) -> String {
         match self.conn_type {
@@ -131,6 +303,38 @@ pub fn connection_view(
                 .strong()
                 .color(ui.visuals().text_color()),
         );
+
+        if let Some(session) = session.as_mut() {
+            if session.ports.len() > 1 {
+                ui.separator();
+                let port_buttons: Vec<(u8, String, bool, usize)> = session
+                    .ports
+                    .iter()
+                    .map(|p| {
+                        (
+                            p.port,
+                            p.name.clone(),
+                            p.port == session.active_port,
+                            *session.port_unread.get(&p.port).unwrap_or(&0),
+                        )
+                    })
+                    .collect();
+                for (port, label, selected, unread) in port_buttons {
+                    let text = if unread > 0 && !selected {
+                        format!("{label} •")
+                    } else {
+                        label
+                    };
+                    if ui
+                        .selectable_label(selected, egui::RichText::new(text).size(12.0))
+                        .clicked()
+                    {
+                        session.switch_to_port(port);
+                        ctx.request_repaint();
+                    }
+                }
+            }
+        }
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Font size quick controls
@@ -356,7 +560,7 @@ pub fn connection_view(
             paste_to_session(session, &text, &ctx, &mut action);
         }
         for bytes in pending_input {
-            session.handle.send(bytes);
+            session.send_active(bytes);
         }
     }
 
@@ -468,7 +672,7 @@ pub fn connection_view(
                 &mut wheel_input,
             );
             for bytes in wheel_input {
-                session.handle.send(bytes);
+                session.send_active(bytes);
             }
 
             let mut mouse_input: Vec<Vec<u8>> = Vec::new();
@@ -487,7 +691,7 @@ pub fn connection_view(
                 );
             }
             for bytes in mouse_input {
-                session.handle.send(bytes);
+                session.send_active(bytes);
             }
 
             let offset = session.scroll_offset;
@@ -625,7 +829,7 @@ pub fn connection_view(
             let mut sent = false;
             for data in &kbd_output {
                 if !data.is_empty() {
-                    session.handle.send(data.clone());
+                    session.send_active(data.clone());
                     sent = true;
                 }
             }
@@ -701,7 +905,7 @@ pub fn paste_to_session(
 ) {
     let bracketed =
         session.terminal.screen.bracketed_paste_enabled() && session.terminal.screen.in_alternate_screen();
-    session.handle.send(paste_payload(text, bracketed));
+    session.send_active(paste_payload(text, bracketed));
     let _ = drain_connection(session, action);
     ctx.request_repaint();
 }
@@ -713,6 +917,18 @@ pub(crate) fn drain_connection(session: &mut ActiveSession, action: &mut Connect
     for ev in session.handle.drain() {
         match ev {
             ConnIn::Data(data) => pty_data.extend(data),
+            ConnIn::PortsChanged(ports) => {
+                session.set_connection_ports(ports);
+                updated = true;
+            }
+            ConnIn::PortData { port, data } => {
+                if port == session.active_port {
+                    pty_data.extend(data);
+                } else {
+                    session.receive_inactive_port_data(port, &data);
+                    updated = true;
+                }
+            }
             ConnIn::StateChanged(s) => {
                 match s {
                     ConnectionState::Error(e) => {
@@ -740,7 +956,7 @@ pub(crate) fn drain_connection(session: &mut ActiveSession, action: &mut Connect
     session.handle.repaint.clear_repaint_pending();
     for resp in session.terminal.drain_pending() {
         match resp {
-            TermEvent::Response(data) => session.handle.send(data),
+            TermEvent::Response(data) => session.send_active(data),
             TermEvent::PtyResize { rows: _, cols: _ } => {
                 // CSI 8 no longer emits this; keep arm so older tests / sequences do not resize the PTY.
             }

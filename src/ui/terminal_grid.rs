@@ -12,6 +12,11 @@ pub fn sync_emulator_grid(session: &mut ActiveSession, rows: usize, cols: usize,
     session.grid_rows = rows;
     session.grid_cols = cols;
     session.terminal.resize(rows, cols);
+    for state in session.inactive_port_states.values_mut() {
+        state.terminal.resize(rows, cols);
+        state.scroll_offset = 0;
+        state.row_galley_cache.clear();
+    }
     session.layout_font_size = font_size;
     session.row_galley_cache.clear();
     session.scroll_offset = 0;

@@ -35,15 +35,64 @@ impl fmt::Display for ConnectionState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionPortKind {
+    Terminal,
+    Serial,
+    Log,
+    Shell,
+    Command,
+    Control,
+    FileTransfer,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectionPort {
+    pub port: u8,
+    pub name: String,
+    pub kind: ConnectionPortKind,
+    pub read_only: bool,
+    pub write_only: bool,
+}
+
+impl ConnectionPort {
+    pub fn terminal(port: u8, name: impl Into<String>) -> Self {
+        Self {
+            port,
+            name: name.into(),
+            kind: ConnectionPortKind::Terminal,
+            read_only: false,
+            write_only: false,
+        }
+    }
+
+    pub fn serial(port: u8, name: impl Into<String>) -> Self {
+        Self {
+            port,
+            name: name.into(),
+            kind: ConnectionPortKind::Serial,
+            read_only: false,
+            write_only: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ConnIn {
     Data(Vec<u8>),
+    /// A connection can expose multiple logical terminal/serial ports over one transport.
+    PortsChanged(Vec<ConnectionPort>),
+    /// Data tagged with a logical port. BLE multi-UART and future mux transports use this.
+    PortData { port: u8, data: Vec<u8> },
     StateChanged(ConnectionState),
 }
 
 #[derive(Debug, Clone)]
 pub enum ConnOut {
     Data(Vec<u8>),
+    /// Write bytes to a logical port. Transports that do not support ports treat port 0 as Data.
+    PortData { port: u8, data: Vec<u8> },
     Resize(u16, u16),
     /// Re-deliver SIGWINCH without changing winsize (ncurses full refresh after resize).
     Winch,
@@ -102,6 +151,27 @@ pub fn emit_conn_data(
     }
 }
 
+pub fn emit_conn_port_data(
+    from: &std::sync::mpsc::Sender<ConnIn>,
+    repaint: &RepaintNotifier,
+    port: u8,
+    data: Vec<u8>,
+) {
+    if from.send(ConnIn::PortData { port, data }).is_ok() {
+        repaint.notify();
+    }
+}
+
+pub fn emit_conn_ports_changed(
+    from: &std::sync::mpsc::Sender<ConnIn>,
+    repaint: &RepaintNotifier,
+    ports: Vec<ConnectionPort>,
+) {
+    if from.send(ConnIn::PortsChanged(ports)).is_ok() {
+        repaint.notify();
+    }
+}
+
 pub struct ConnectionHandle {
     pub sender: std::sync::mpsc::Sender<ConnOut>,
     pub receiver: std::sync::mpsc::Receiver<ConnIn>,
@@ -156,6 +226,14 @@ impl ConnectionHandle {
 
     pub fn send(&self, data: Vec<u8>) {
         let _ = self.sender.send(ConnOut::Data(data));
+    }
+
+    pub fn send_to_port(&self, port: u8, data: Vec<u8>) {
+        if port == 0 {
+            let _ = self.sender.send(ConnOut::Data(data));
+        } else {
+            let _ = self.sender.send(ConnOut::PortData { port, data });
+        }
     }
 
     pub fn resize(&self, rows: u16, cols: u16) {
