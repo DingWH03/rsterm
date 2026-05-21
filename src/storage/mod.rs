@@ -6,9 +6,41 @@ use directories::ProjectDirs;
 use log::info;
 use types::SavedConnection;
 
-fn storage_path() -> Option<PathBuf> {
+// ---------------------------------------------------------------------------
+// Android config directory override
+// ---------------------------------------------------------------------------
+/// On Android, `ProjectDirs` may fail because environment vars like `$HOME`
+/// are not set in a `NativeActivity`.  We store the path from
+/// `AndroidApp::internal_data_path()` here at startup.
+#[cfg(target_os = "android")]
+static ANDROID_BASE_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Initialise the config directory from a platform-provided path
+/// (called from `android_main()`).
+#[cfg(target_os = "android")]
+pub fn init_android_base_dir(path: PathBuf) {
+    let _ = ANDROID_BASE_DIR.set(path);
+}
+
+/// Resolve the application config directory.
+///
+/// * **Desktop** – uses [`directories::ProjectDirs`] (XDG on Linux,
+///   `~/Library/Application Support` on macOS, `AppData` on Windows).
+/// * **Android** – uses [`AndroidApp::internal_data_path`] which resolves to
+///   `/data/data/<package>/files/config/`.
+pub fn config_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "android")]
+    {
+        if let Some(dir) = ANDROID_BASE_DIR.get() {
+            return Some(dir.join("config"));
+        }
+    }
     ProjectDirs::from("io", "rsterm", "rsTerm")
         .map(|d| d.config_dir().to_path_buf())
+}
+
+fn storage_path() -> Option<PathBuf> {
+    config_dir()
 }
 
 pub fn load_connections() -> Vec<SavedConnection> {

@@ -1,4 +1,5 @@
 //! Android external storage: manifest permissions + runtime prompts.
+//! Also handles BLE runtime permission requests (Android 12+).
 
 use jni::errors::Error;
 use jni::objects::{JObject, JObjectArray, JString, JValue};
@@ -9,6 +10,11 @@ const PERM_READ: &str = "android.permission.READ_EXTERNAL_STORAGE";
 const PERM_WRITE: &str = "android.permission.WRITE_EXTERNAL_STORAGE";
 const PERMISSION_GRANTED: i32 = 0;
 const REQUEST_CODE_STORAGE: i32 = 42;
+const REQUEST_CODE_BLE: i32 = 43;
+
+/// BLE permissions needed on Android 12+ (API 31+).
+const PERM_BLE_SCAN: &str = "android.permission.BLUETOOTH_SCAN";
+const PERM_BLE_CONNECT: &str = "android.permission.BLUETOOTH_CONNECT";
 
 /// Request legacy read/write (API 23–32) and all-files access settings (API 30+) when needed.
 pub fn ensure_storage_access(app: &AndroidApp) {
@@ -148,5 +154,62 @@ fn ensure_all_files_access(env: &mut Env<'_>, activity: &JObject) -> Result<(), 
         &[JValue::Object(&intent)],
     )?;
     log::info!("opened all-files access settings (grant storage in system UI)");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Bluetooth LE runtime permissions (Android 12+)
+// ---------------------------------------------------------------------------
+
+/// Request `BLUETOOTH_SCAN` + `BLUETOOTH_CONNECT` at runtime on API 31+.
+///
+/// On older API levels these are granted at install time via the manifest
+/// declarations with `android:maxSdkVersion="30"`.
+pub fn ensure_bluetooth_access(app: &AndroidApp) {
+    let worker = app.clone();
+    app.clone().run_on_java_main_thread(Box::new(move || {
+        if let Err(e) = request_ble_permissions(&worker) {
+            log::warn!("BLE permission request failed: {e}");
+        }
+    }));
+}
+
+fn request_ble_permissions(app: &AndroidApp) -> Result<(), String> {
+    let jvm = unsafe { JavaVM::from_raw(app.vm_as_ptr() as *mut jni::sys::JavaVM) };
+    jvm.attach_current_thread(|env| -> Result<(), Error> {
+        let sdk = sdk_int(env)?;
+        // Only API 31+ needs runtime BLE permission prompts
+        if sdk < 31 {
+            return Ok(());
+        }
+        let activity = activity_jobject(env, app);
+
+        let mut perms = Vec::new();
+        if !has_permission(env, &activity, PERM_BLE_SCAN)? {
+            perms.push(PERM_BLE_SCAN);
+        }
+        if !has_permission(env, &activity, PERM_BLE_CONNECT)? {
+            perms.push(PERM_BLE_CONNECT);
+        }
+        if perms.is_empty() {
+            return Ok(());
+        }
+
+        let placeholder = env.new_string("")?;
+        let array = JObjectArray::<JString>::new(env, perms.len(), &placeholder)?;
+        for (i, p) in perms.iter().enumerate() {
+            let s = env.new_string(p)?;
+            array.set_element(env, i, &s)?;
+        }
+        env.call_method(
+            &activity,
+            jni_str!("requestPermissions"),
+            jni_sig!("([Ljava/lang/String;I)V"),
+            &[JValue::Object(&array), JValue::Int(REQUEST_CODE_BLE)],
+        )?;
+        log::info!("requested BLE permissions: {:?}", perms);
+        Ok(())
+    })
+    .map_err(|e| format!("JNI: {e}"))?;
     Ok(())
 }

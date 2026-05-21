@@ -4511,6 +4511,7 @@ dependencies = [
  "egui",
  "env_logger",
  "fontdb",
+ "futures",
  "jni 0.22.4",
  "libc",
  "log",

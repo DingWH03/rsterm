@@ -194,6 +194,5 @@ pub fn save_settings(settings: &AppSettings) {
 }
 
 fn settings_path() -> Option<std::path::PathBuf> {
-    directories::ProjectDirs::from("io", "rsterm", "rsTerm")
-        .map(|d| d.config_dir().join("settings.json"))
+    crate::storage::config_dir().map(|p| p.join("settings.json"))
 }
