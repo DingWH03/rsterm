@@ -117,7 +117,7 @@ pub(crate) fn trimmed_row_len(cells: &[Cell]) -> usize {
     let mut end = cells.len();
     while end > 0 {
         let c = cells[end - 1];
-        if c.ch == ' ' && !c.wide_continuation {
+        if (c.ch == ' ' || c.ch == '\0') && !c.wide_continuation {
             end -= 1;
         } else {
             break;
@@ -143,6 +143,18 @@ fn row_to_logical_cells_with_trim(row: &[Cell], trim_trailing_spaces: bool) -> V
     let mut out = Vec::new();
 
     let mut end = row.len();
+
+    // Always trim trailing unwritten markers (NUL) that come from CJK
+    // wide-character wrapping at the right margin.
+    while end > 0 {
+        let c = row[end - 1];
+        if c.ch == '\0' && !c.wide_continuation {
+            end -= 1;
+        } else {
+            break;
+        }
+    }
+
     if trim_trailing_spaces {
         while end > 0 {
             let c = row[end - 1];
@@ -213,12 +225,18 @@ pub(crate) fn layout_logical_line(line: &LogicalLine, cols: usize) -> Vec<Vec<Ce
 
         // Need to wrap?
         if x + lc.width > cols {
+            // Mark trailing cells that were never written with NUL so reflow
+            // does not accumulate extra spaces on repeated shrink/widen cycles.
+            for c in row.iter_mut().skip(x) {
+                c.ch = '\0';
+            }
             rows.push(row);
             row = vec![Cell::default(); cols];
             x = 0;
         }
 
         // Safety: if width > cols, push a row and start fresh.
+        // (Cells are already default from the new row allocation above.)
         if x >= cols {
             rows.push(row);
             row = vec![Cell::default(); cols];
@@ -302,6 +320,11 @@ fn layout_logical_line_segments(
 
         let width = lc.width.max(1);
         if x > 0 && x + width > cols {
+            // Mark trailing unwritten cells with NUL to prevent reflow from
+            // accumulating extra spaces on repeated shrink/widen cycles.
+            for c in row.iter_mut().skip(x) {
+                c.ch = '\0';
+            }
             rows.push(VisualSegment {
                 row,
                 start,
@@ -680,10 +703,23 @@ impl Screen {
         }
     }
 
+    /// Clear the saved scrollback and every derived visual-layout cache.
+    ///
+    /// This implements xterm's `CSI 3 J` ("erase saved lines").  It is important
+    /// after a resize: shrinking the terminal may reflow the live screen and move
+    /// overflowing visual rows into scrollback, so `clear` must be able to remove
+    /// those rows as well instead of leaving them above the cleared viewport.
+    fn clear_scrollback(&mut self) {
+        self.scrollback.clear();
+        self.visual_cache.clear();
+        self.visual_starts.clear();
+        self.visual_wrapped.clear();
+    }
+
     fn row_is_blank(&self, y: usize) -> bool {
         self.cells
             .get(y)
-            .is_some_and(|row| row.iter().all(|c| c.ch == ' ' && !c.wide_continuation))
+            .is_some_and(|row| row.iter().all(|c| (c.ch == ' ' || c.ch == '\0') && !c.wide_continuation))
     }
 
     /// zsh preprompt: `%` then spaces until `\r`, used to clear the line before drawing the prompt.
@@ -696,7 +732,7 @@ impl Screen {
         }
         row[1..]
             .iter()
-            .all(|c| c.ch == ' ' && !c.wide_continuation)
+            .all(|c| (c.ch == ' ' || c.ch == '\0') && !c.wide_continuation)
     }
 
     fn clear_row(&mut self, y: usize) {
@@ -778,7 +814,10 @@ impl Screen {
             }
             // zsh preprompt is `\r\n%<spaces>\r<prompt>`; skip the leading `\r\n` when we are
             // already on a fresh blank line after command output ending with `\n`.
-            if self.cursor_x == 0 && self.row_is_blank(self.cursor_y) {
+            // However, after `\x1b[H\x1b[2J` (clear), cursor is at (0,0) and row 0 is blank,
+            // but the shell `\r\n` before the prompt should advance past the cleared area,
+            // so we check cursor_y > 0 to distinguish natural scrolling from explicit clear.
+            if self.cursor_x == 0 && self.cursor_y > 0 && self.row_is_blank(self.cursor_y) {
                 return;
             }
             self.newline();
@@ -907,14 +946,36 @@ impl Screen {
         let old_cursor_y = self.cursor_y;
         let old_cursor_x = self.cursor_x;
 
+        // Only rows that contain real content, or rows up to the cursor, should
+        // participate in main-screen reflow.  Blank rows below the cursor are just
+        // terminal background.  Including them when the width shrinks anchors the
+        // bottom blank area and pushes command history into scrollback, which makes
+        // history appear to "move upward" and later makes `clear` look ineffective.
+        let old_active_rows = if old_cells.is_empty() {
+            0
+        } else {
+            let mut last = old_cursor_y.min(old_cells.len().saturating_sub(1));
+            for (y, row) in old_cells.iter().enumerate() {
+                if row
+                    .iter()
+                    .take(self.cols.min(row.len()))
+                    .any(|c| c.ch != ' ' || c.wide_continuation)
+                {
+                    last = last.max(y);
+                }
+            }
+            (last + 1).min(old_cells.len())
+        };
+
         let mut logical_lines: Vec<LogicalLine> = Vec::new();
         let mut first_wrapped: Vec<bool> = Vec::new();
         let mut row_to_line: Vec<usize> = vec![0; old_cells.len()];
         let mut row_base_offset: Vec<usize> = vec![0; old_cells.len()];
 
-        for (r, row) in old_cells.iter().enumerate() {
+        for (r, row) in old_cells.iter().take(old_active_rows).enumerate() {
             let is_cont = old_wrapped.get(r).copied().unwrap_or(false);
-            let next_is_cont = old_wrapped.get(r + 1).copied().unwrap_or(false);
+            let next_is_cont = r + 1 < old_active_rows
+                && old_wrapped.get(r + 1).copied().unwrap_or(false);
             // If the next row is a soft-wrap continuation, this row is an
             // interior segment of the same logical line.  Preserve trailing
             // spaces at the segment boundary; they may be real column padding.
@@ -961,14 +1022,15 @@ impl Screen {
             }
         }
 
-        let cursor_line_and_offset = if old_cursor_y < old_cells.len() {
-            let li = row_to_line[old_cursor_y];
-            let offset = row_base_offset[old_cursor_y]
-                + row_logical_offset_for_display_col(&old_cells[old_cursor_y], old_cursor_x);
-            Some((li, offset.min(logical_lines[li].cells.len())))
-        } else {
-            None
-        };
+        let cursor_line_and_offset =
+            if old_cursor_y < old_active_rows && old_cursor_y < old_cells.len() {
+                let li = row_to_line[old_cursor_y];
+                let offset = row_base_offset[old_cursor_y]
+                    + row_logical_offset_for_display_col(&old_cells[old_cursor_y], old_cursor_x);
+                Some((li, offset.min(logical_lines[li].cells.len())))
+            } else {
+                None
+            };
 
         let mut visual_rows: Vec<(usize, VisualSegment)> = Vec::new();
         for (li, line) in logical_lines.iter().enumerate() {
@@ -1260,6 +1322,16 @@ impl Screen {
             return true;
         }
         if self.auto_wrap {
+            // Mark trailing cells that were never written (because a wide
+            // char didn't fit) with NUL so reflow does not interpret them
+            // as real space characters.  Otherwise every shrink/widen cycle
+            // accumulates extra spaces between CJK characters.
+            for col in self.cursor_x..self.cols {
+                self.cells[self.cursor_y][col] = Cell {
+                    ch: '\0',
+                    ..Cell::default()
+                };
+            }
             self.newline_with_wrap(true);
             self.cursor_x = 0;
             self.cursor_x + width <= self.cols
@@ -1576,7 +1648,13 @@ impl Screen {
         if self.in_alternate_screen() {
             0
         } else {
-            let total = self.scrollback_lines() + self.active_main_rows();
+            // Use the full screen height (`self.rows`) rather than the
+            // "active" row count so that after `\x1b[2J` (clear) the
+            // entire blank viewport stays visible.  Using
+            // `active_main_rows()` would produce a small total when the
+            // screen was cleared, causing the viewport to shift into the
+            // scrollback and resurrect old history at scroll-offset 0.
+            let total = self.scrollback_lines() + self.rows;
             total.saturating_sub(viewport_rows)
         }
     }
@@ -1907,11 +1985,19 @@ impl TermHandler for Screen {
                         }
                         self.erase_cells_in_row(self.cursor_y, 0, self.cursor_x.saturating_add(1), false);
                     }
-                    2 | 3 => {
-                        // Erase all — reset to default rendition
+                    2 => {
+                        // Erase the visible display — reset to default rendition.
+                        // Scrollback is intentionally preserved; `CSI 3 J` below
+                        // is the xterm extension used by `clear`/E3 to erase it.
                         for y in 0..self.rows {
                             self.erase_cells_in_row(y, 0, self.cols, true);
                         }
+                    }
+                    3 => {
+                        // xterm extension: erase saved lines / scrollback.
+                        // This is what removes rows that were pushed above the
+                        // viewport by a width-shrink reflow.
+                        self.clear_scrollback();
                     }
                     _ => {}
                 }

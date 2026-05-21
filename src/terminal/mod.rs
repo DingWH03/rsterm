@@ -323,6 +323,41 @@ mod tests {
     }
 
     #[test]
+    fn clear_screen_ed2_works() {
+        // Simulate `clear` → \x1b[H\x1b[2J → then new prompt
+        let mut term = Terminal::new(4, 40);
+        term.write(b"some old content that should disappear\n");
+        term.write(b"more content on row 2\n");
+        assert_ne!(term.screen.cells[0][0].ch, ' ', "row 0 should have content before clear");
+
+        term.write(b"\x1b[H\x1b[2J");
+        // After clear: all cells should be blank spaces
+        for row in 0..term.screen.rows {
+            let blank = term.screen.cells[row]
+                .iter()
+                .all(|c| (c.ch == ' ' || c.ch == '\0') && !c.wide_continuation);
+            assert!(blank, "row {row} should be blank after clear");
+        }
+        assert_eq!(term.screen.cursor_x, 0);
+        assert_eq!(term.screen.cursor_y, 0);
+
+        // After clear, cursor at (0,0), shell sends \r\n + prompt →
+        // The `\r\n` should NOT be suppressed here because it's a real newline
+        // that moves the prompt below the cleared area.
+        term.write(b"\r\nprompt> ");
+        assert_eq!(
+            term.screen.cursor_y, 1,
+            "after clear + \\r\\n + prompt, cursor should be on row 1, not {}",
+            term.screen.cursor_y
+        );
+        let row1: String = term.screen.cells[1].iter().map(|c| c.ch).collect();
+        assert!(
+            row1.contains("prompt"),
+            "prompt should appear on row 1, got: {row1:?}"
+        );
+    }
+
+    #[test]
     fn crlf_is_single_newline() {
         let mut term = Terminal::new(3, 10);
         term.write(b"line1\r\nline2");
@@ -906,10 +941,16 @@ mod tests {
         // Cursor is after Z at col 26.
         assert_eq!(term.screen.cursor_y, 0);
         assert_eq!(term.screen.cursor_x, 26);
-        // Resize narrower — cursor gets clamped (visible grid truncated).
+        // Resize narrower — visible grid is truncated and the cursor
+        // lands at its logical position within the last visible segment,
+        // not at the rightmost column.
         term.resize(4, 10);
-        assert_eq!(term.screen.cursor_x, 9, "cursor clamped to last col");
-        assert_eq!(term.screen.cursor_y, 0, "cursor stays on row 0");
+        // Logical line "ABCDEFGHIJKLMNOPQRSTUVWXYZ" reflowed at width 10:
+        //   segment 0  cols 0‑9   "ABCDEFGHIJ"
+        //   segment 1  cols 0‑9   "KLMNOPQRST"
+        //   segment 2  cols 0‑5   "UVWXYZ"      ← cursor after Z = display col 6
+        assert_eq!(term.screen.cursor_x, 6, "cursor at display col 6 in last segment");
+        assert_eq!(term.screen.cursor_y, 2, "cursor on row 2 (third visual segment of the reflowed logical line)");
     }
 
     #[test]
@@ -939,5 +980,46 @@ mod tests {
             .collect();
         assert!(all_text.contains("FIRST"), "FIRST should be in scrollback, got {all_text:?}");
         assert!(all_text.contains("SECOND"), "SECOND should be in scrollback, got {all_text:?}");
+    }
+
+    #[test]
+    fn cjk_resize_no_space_accumulation() {
+        // CJK chars are width=2; "文件 视频" is 5 logical chars (文 件 空格 视 频).
+        // At width 6: 文(w2)+件(w2)+空格(w1)=5 cols, 视(w2) wraps to row 1.
+        // Cell at (row0, col5) is never written → was Cell::default (ch=' ')
+        // which reflow interpreted as a real space → extra space each resize.
+        let mut term = Terminal::new(5, 6);
+        term.write("文件 视频".as_bytes());
+        assert_eq!(term.screen.cursor_y, 1, "视 wrapped to row 1");
+
+        // Helper: collect non-null logical chars from row 0.
+        fn row0_text(term: &Terminal) -> String {
+            term.screen.cells[0]
+                .iter()
+                .filter(|c| c.ch != '\0' && !c.wide_continuation)
+                .map(|c| c.ch)
+                .collect::<String>()
+        }
+        assert_eq!(row0_text(&term), "文件 ", "initial row0: 文 件 space");
+
+        // Shrink to 5 cols then widen back to 6 cols.
+        term.resize(5, 5);
+        term.resize(5, 6);
+        assert_eq!(
+            row0_text(&term), "文件 ",
+            "no extra space after 1 shrink/widen cycle"
+        );
+
+        // Repeat 5 more times to guarantee no accumulation.
+        for _ in 0..5 {
+            term.resize(5, 5);
+            term.resize(5, 6);
+        }
+        assert_eq!(
+            row0_text(&term), "文件 ",
+            "no extra space after 6 shrink/widen cycles"
+        );
+
+        assert!(term.screen.cursor_y < term.screen.rows, "cursor inside screen");
     }
 }

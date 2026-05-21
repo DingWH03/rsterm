@@ -156,12 +156,12 @@ pub fn paint_row(
             egui::vec2(cell_w * span as f32, cell_h),
         );
 
-        if !tui_surface && cell.ch == ' ' && attrs.is_suggestion_style() {
+        if !tui_surface && (cell.ch == ' ' || cell.ch == '\0') && attrs.is_suggestion_style() {
             // zsh clears suggestion with dim/gray spaces — erase stale glyphs underneath.
             painter.rect_filled(cell_rect, egui::CornerRadius::ZERO, theme.bg);
         }
 
-        if cell.ch != ' ' {
+        if cell.ch != ' ' && cell.ch != '\0' {
             let galley = layout_glyph(ui, cache, font_size, theme, cell.ch, attrs);
             let (fg, _) = resolve_colors(theme, attrs);
             paint_glyph_at(&painter, galley, cell_rect, fg);
