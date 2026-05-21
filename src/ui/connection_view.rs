@@ -1096,19 +1096,17 @@ fn install_terminal_context_menu(
     let menu_id = resp.id.with("terminal_ctx_popup");
     let is_touch = ui.input(|i| i.has_touch_screen());
 
-    // Desktop right-click opens the popup (not on touch, where secondary_clicked
-    // may also fire on long-press on some backends).
-    let right_clicked = resp.secondary_clicked() && !is_touch;
+    // Desktop right-click context menu (correctly positioned at cursor).
+    // Not registered on touch devices to avoid accidental long-press triggering.
+    if !is_touch {
+        resp.context_menu(|ui| terminal_context_menu_contents(ui, has_selection, action));
+    }
 
-    // Touch long-press on already-selected text (set by the long_touched handler).
-    let touch_trigger = force_popup;
-
-    let open_cmd = (right_clicked || touch_trigger)
-        .then_some(egui::SetOpenCommand::Bool(true));
-
+    // Touch long-press on already-selected text.
+    let touch_open = force_popup.then_some(egui::SetOpenCommand::Bool(true));
     egui::Popup::from_response(resp)
         .id(menu_id)
-        .open_memory(open_cmd)
+        .open_memory(touch_open)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             ui.set_min_width(150.0);
