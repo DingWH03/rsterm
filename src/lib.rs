@@ -73,6 +73,11 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
     platform::ensure_storage_access(&app);
     platform::ensure_bluetooth_access(&app);
 
+    // Initialise btleplug (Droidplug) for BLE scanning/connection.
+    // Android BLE work later runs on spawned Rust threads, so the platform
+    // helper stores the JavaVM and can lazily re-run init from those threads.
+    platform::init_btleplug(&app);
+
     // -- Initialise persistent config path ------------------------------
     // Android NativeActivity does NOT set $HOME / $XDG_CONFIG_HOME, so
     // the `directories` crate returns None and config is lost on restart.

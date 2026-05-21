@@ -4,6 +4,8 @@
 mod android_ime;
 #[cfg(target_os = "android")]
 mod android_storage;
+#[cfg(target_os = "android")]
+mod android_btleplug;
 
 mod ble;
 mod process;
@@ -16,6 +18,8 @@ pub use android_ime::{bottom_inset_points, init as init_android_ime, top_inset_p
 pub use android_storage::{
     ensure_bluetooth_access, ensure_storage_access, has_bluetooth_access, request_bluetooth_access,
 };
+#[cfg(target_os = "android")]
+pub use android_btleplug::{ensure_btleplug_initialized, init_btleplug};
 
 pub use process::{
     foreground_command, foreground_process_pid, local_user_at_host, ssh_user_at_host,

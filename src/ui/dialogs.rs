@@ -430,7 +430,22 @@ impl NewConnectionDialog {
         self.ble_scanning = true;
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let result = scan_ble_devices_blocking();
+            let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                scan_ble_devices_blocking()
+            })) {
+                Ok(Ok(devices)) => Ok(devices),
+                Ok(Err(e)) => Err(e),
+                Err(panic) => {
+                    let msg = if let Some(s) = panic.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = panic.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "未知错误".to_string()
+                    };
+                    Err(format!("BLE 扫描异常：{msg}"))
+                }
+            };
             let _ = tx.send(result);
             ctx.request_repaint();
         });
@@ -461,7 +476,8 @@ impl NewConnectionDialog {
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.ble_scanning = false;
-                self.ble_scan_error = Some("BLE 扫描线程已结束，请重试。".to_string());
+                self.ble_scan_error = Some("BLE 扫描线程意外退出，请重试。".to_string());
+                log::warn!("BLE scan thread disconnected without sending a result");
             }
         }
     }

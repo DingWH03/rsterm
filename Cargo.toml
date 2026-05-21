@@ -89,3 +89,6 @@ android_logger = "0.15"
 android_clipboard = "0.1"
 winit = { version = "0.30", features = ["android-native-activity"] }
 jni = "0.22"
+# btleplug (used for BLE) depends on jni 0.19 – the renamed crate lets us
+# call btleplug::platform::init() without type conflicts.
+jni_0_19 = { version = "0.19", package = "jni" }

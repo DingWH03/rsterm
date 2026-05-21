@@ -4512,6 +4512,7 @@ dependencies = [
  "env_logger",
  "fontdb",
  "futures",
+ "jni 0.19.0",
  "jni 0.22.4",
  "libc",
  "log",

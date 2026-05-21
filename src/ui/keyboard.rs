@@ -74,12 +74,8 @@ impl VirtualKeyboard {
         }
     }
 
-    /// Layout mode used for sizing and painting (IME on Android ⇒ function keys only).
+    /// Layout mode used for sizing and painting.
     pub fn effective_mode(&self) -> KeyboardMode {
-        #[cfg(target_os = "android")]
-        if self.ime_active {
-            return KeyboardMode::Special;
-        }
         self.mode
     }
 

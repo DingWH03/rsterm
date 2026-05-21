@@ -12,6 +12,9 @@ pub fn scan_ble_devices_blocking() -> Result<Vec<String>, String> {
 }
 
 async fn scan_ble_async() -> Result<Vec<String>, String> {
+    #[cfg(target_os = "android")]
+    crate::platform::ensure_btleplug_initialized()?;
+
     use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
     use btleplug::platform::Manager;
 
