@@ -528,6 +528,15 @@ impl eframe::App for RstermApp {
         self.sidebar.sync_width(ctx.content_rect().width());
         show_connection_notice(ctx, &mut self.connection_notice);
 
+        // Android status‑bar inset (0 on desktop).
+        let top_inset: f32 = {
+            #[cfg(target_os = "android")] {
+                crate::platform::top_inset_points(ctx)
+            }
+            #[cfg(not(target_os = "android"))]
+            { 0.0 }
+        };
+
         let session_count = self.sessions.len();
         if show_quit_confirm_dialog(ctx, &mut self.show_quit_dialog, session_count) {
             self.quit_after_close = true;
@@ -554,6 +563,7 @@ impl eframe::App for RstermApp {
                         .max_width(280.0)
                         .resizable(false)
                         .show(ctx, |ui| {
+                            ui.add_space(top_inset);
                             let r = paint_home_sidebar(
                                 ui,
                                 &mut self.sidebar,
@@ -586,6 +596,7 @@ impl eframe::App for RstermApp {
                 }
 
                 egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.add_space(top_inset);
                     if self.sidebar.show_content_hamburger(SidebarPage::Home) {
                         ui.horizontal(|ui| {
                             if self.sidebar.hamburger(ui).clicked() {
@@ -693,6 +704,7 @@ impl eframe::App for RstermApp {
                         .max_width(300.0)
                         .resizable(true)
                         .show(ctx, |ui| {
+                            ui.add_space(top_inset);
                             sidebar_action = terminal_sidebar(
                                 ui,
                                 &mut self.sidebar,
@@ -753,6 +765,7 @@ impl eframe::App for RstermApp {
                 }
 
                 egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.add_space(top_inset);
                     if self.workspace_settings {
                         if settings_page(ui, &mut self.settings) {
                             self.workspace_settings = false;

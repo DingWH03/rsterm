@@ -161,10 +161,11 @@ fn ensure_all_files_access(env: &mut Env<'_>, activity: &JObject) -> Result<(), 
 // Bluetooth LE runtime permissions (Android 12+)
 // ---------------------------------------------------------------------------
 
-/// Request `BLUETOOTH_SCAN` + `BLUETOOTH_CONNECT` at runtime on API 31+.
+/// Request BLE + location permissions needed for Bluetooth scanning.
 ///
-/// On older API levels these are granted at install time via the manifest
-/// declarations with `android:maxSdkVersion="30"`.
+/// - API 31+ : `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`
+/// - API 29-30: `ACCESS_FINE_LOCATION`
+/// - API ≤ 28 : `ACCESS_COARSE_LOCATION`
 pub fn ensure_bluetooth_access(app: &AndroidApp) {
     let worker = app.clone();
     app.clone().run_on_java_main_thread(Box::new(move || {
@@ -174,23 +175,39 @@ pub fn ensure_bluetooth_access(app: &AndroidApp) {
     }));
 }
 
+const PERM_BLE_FINE_LOC: &str = "android.permission.ACCESS_FINE_LOCATION";
+const PERM_BLE_COARSE_LOC: &str = "android.permission.ACCESS_COARSE_LOCATION";
+
 fn request_ble_permissions(app: &AndroidApp) -> Result<(), String> {
     let jvm = unsafe { JavaVM::from_raw(app.vm_as_ptr() as *mut jni::sys::JavaVM) };
     jvm.attach_current_thread(|env| -> Result<(), Error> {
         let sdk = sdk_int(env)?;
-        // Only API 31+ needs runtime BLE permission prompts
-        if sdk < 31 {
-            return Ok(());
-        }
         let activity = activity_jobject(env, app);
 
         let mut perms = Vec::new();
-        if !has_permission(env, &activity, PERM_BLE_SCAN)? {
-            perms.push(PERM_BLE_SCAN);
+
+        if sdk >= 31 {
+            // Android 12+ : granular BLE permissions
+            if !has_permission(env, &activity, PERM_BLE_SCAN)? {
+                perms.push(PERM_BLE_SCAN);
+            }
+            if !has_permission(env, &activity, PERM_BLE_CONNECT)? {
+                perms.push(PERM_BLE_CONNECT);
+            }
         }
-        if !has_permission(env, &activity, PERM_BLE_CONNECT)? {
-            perms.push(PERM_BLE_CONNECT);
+
+        if (29..=30).contains(&sdk) {
+            // Android 10-11 : BLE scan requires fine location
+            if !has_permission(env, &activity, PERM_BLE_FINE_LOC)? {
+                perms.push(PERM_BLE_FINE_LOC);
+            }
+        } else if sdk <= 28 {
+            // Android 6-9 : BLE scan requires coarse location
+            if !has_permission(env, &activity, PERM_BLE_COARSE_LOC)? {
+                perms.push(PERM_BLE_COARSE_LOC);
+            }
         }
+
         if perms.is_empty() {
             return Ok(());
         }
