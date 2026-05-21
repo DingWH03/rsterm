@@ -345,6 +345,7 @@ impl RstermApp {
             scroll_offset: 0,
             selection: None,
             selection_pointer: None,
+            touch_state: Default::default(),
             want_terminal_focus: true,
             terminal_had_focus: false,
             row_galley_cache: Default::default(),

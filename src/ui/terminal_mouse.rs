@@ -3,6 +3,7 @@
 use egui::{PointerButton, Pos2, Rect, Response, TouchPhase, Ui};
 
 use crate::terminal::screen::Screen;
+use crate::ui::terminal_selection::TerminalTouchState;
 
 /// Encode xterm SGR mouse report (`CSI < Cb ; Cx ; Cy M|m`).
 pub fn encode_sgr_mouse(button: u8, col: usize, row: usize, release: bool) -> Vec<u8> {
@@ -183,6 +184,94 @@ pub fn process_terminal_mouse(
     if term_resp.dragged() && (screen.mouse_report_drag() || screen.mouse_report_motion()) {
         emit_at(pending_input, pos, 0, false, true);
     }
+}
+
+/// Touch-screen: one-finger vertical drag scrolls terminal scrollback.
+///
+/// Text selection on touch devices is deliberately gated by `touch_select_mode`
+/// so a normal finger drag can behave like a mobile scroll view instead of
+/// immediately selecting text.
+pub fn process_touch_scroll(
+    ui: &Ui,
+    term_resp: &Response,
+    grid_rect: Rect,
+    cell_h: f32,
+    screen: &Screen,
+    in_alt: bool,
+    max_scroll_offset: usize,
+    scroll_offset_mut: &mut usize,
+    touch_state: &mut TerminalTouchState,
+) -> bool {
+    if !ui.input(|i| i.has_touch_screen()) || cell_h <= 0.0 {
+        touch_state.scroll_last_pos = None;
+        touch_state.scroll_remainder_rows = 0.0;
+        touch_state.scrolled_this_touch = false;
+        return false;
+    }
+
+    // In full-screen TUIs or when xterm mouse reporting is active, keep existing mouse/touch
+    // reporting semantics. Shell scrollback should be handled by this mobile-scroll path.
+    let zooming = ui.ctx().input(|i| (i.zoom_delta() - 1.0).abs() > 0.01);
+    if zooming || in_alt || screen.mouse_tracking_active() || touch_state.touch_select_mode {
+        touch_state.scroll_last_pos = None;
+        touch_state.scroll_remainder_rows = 0.0;
+        touch_state.scrolled_this_touch = false;
+        return false;
+    }
+
+    let mut did_scroll = false;
+    for event in ui.input(|i| i.events.clone()) {
+        let egui::Event::Touch { pos, phase, .. } = event else {
+            continue;
+        };
+
+        match phase {
+            TouchPhase::Start => {
+                if grid_rect.contains(pos) || term_resp.rect.contains(pos) {
+                    touch_state.scroll_last_pos = Some(pos);
+                    touch_state.scroll_remainder_rows = 0.0;
+                    touch_state.scrolled_this_touch = false;
+                }
+            }
+            TouchPhase::Move => {
+                let Some(last_pos) = touch_state.scroll_last_pos else {
+                    continue;
+                };
+                if !grid_rect.contains(pos) && !term_resp.rect.contains(pos) {
+                    touch_state.scroll_last_pos = Some(pos);
+                    continue;
+                }
+
+                let delta_y = pos.y - last_pos.y;
+                touch_state.scroll_last_pos = Some(pos);
+                touch_state.scroll_remainder_rows += delta_y / cell_h;
+
+                let whole_rows = touch_state.scroll_remainder_rows.trunc() as isize;
+                if whole_rows == 0 {
+                    continue;
+                }
+                touch_state.scroll_remainder_rows -= whole_rows as f32;
+
+                if max_scroll_offset > 0 {
+                    let new_offset = (*scroll_offset_mut as isize + whole_rows)
+                        .clamp(0, max_scroll_offset as isize) as usize;
+                    if new_offset != *scroll_offset_mut {
+                        *scroll_offset_mut = new_offset;
+                        did_scroll = true;
+                        touch_state.scrolled_this_touch = true;
+                    }
+                } else {
+                    *scroll_offset_mut = 0;
+                }
+            }
+            TouchPhase::End | TouchPhase::Cancel => {
+                touch_state.scroll_last_pos = None;
+                touch_state.scroll_remainder_rows = 0.0;
+            }
+        }
+    }
+
+    did_scroll
 }
 
 /// Wheel: SGR buttons 64/65 when mouse tracking is on; else arrows in alt-screen apps.

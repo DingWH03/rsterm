@@ -20,9 +20,13 @@ use crate::ui::terminal_input::{
     sync_android_soft_input, terminal_widget_id, TERMINAL_GRID_MARGIN,
 };
 use crate::ui::terminal_paint::{paint_row, RowGalleyCache};
-use crate::ui::terminal_mouse::{process_terminal_mouse, process_terminal_wheel};
+use crate::ui::terminal_mouse::{
+    process_terminal_mouse, process_terminal_wheel, process_touch_scroll,
+};
 use crate::ui::terminal_selection::{
-    CellPos, TerminalSelection, paint_selection, paste_payload, update_terminal_selection,
+    CellPos, TerminalSelection, TerminalTouchState, is_pos_in_selection,
+    paint_selection, paint_selection_handles, paste_payload,
+    touch_long_press_selection_from_pos, update_terminal_selection,
 };
 
 pub struct PortUiState {
@@ -33,6 +37,7 @@ pub struct PortUiState {
     pub scroll_offset: usize,
     pub selection: Option<TerminalSelection>,
     pub selection_pointer: Option<CellPos>,
+    pub touch_state: TerminalTouchState,
     pub row_galley_cache: RowGalleyCache,
     pub mouse_motion_last: Option<(usize, usize)>,
 }
@@ -56,6 +61,7 @@ impl PortUiState {
             scroll_offset: 0,
             selection: None,
             selection_pointer: None,
+            touch_state: TerminalTouchState::default(),
             row_galley_cache: Default::default(),
             mouse_motion_last: None,
         }
@@ -87,6 +93,8 @@ pub struct ActiveSession {
     pub scroll_offset: usize,
     pub selection: Option<TerminalSelection>,
     pub selection_pointer: Option<CellPos>,
+    /// Android touch state for scrollback drag, long-press selection mode, and gesture cleanup.
+    pub touch_state: TerminalTouchState,
     /// Request keyboard focus on the terminal surface once after connect / click.
     pub want_terminal_focus: bool,
     /// Previous frame: terminal area had keyboard focus (for shortcut routing).
@@ -157,6 +165,7 @@ impl ActiveSession {
             scroll_offset: self.scroll_offset,
             selection: self.selection.take(),
             selection_pointer: self.selection_pointer.take(),
+            touch_state: std::mem::take(&mut self.touch_state),
             row_galley_cache: std::mem::take(&mut self.row_galley_cache),
             mouse_motion_last: self.mouse_motion_last.take(),
         }
@@ -168,6 +177,7 @@ impl ActiveSession {
         self.scroll_offset = state.scroll_offset;
         self.selection = state.selection;
         self.selection_pointer = state.selection_pointer;
+        self.touch_state = state.touch_state;
         self.row_galley_cache = state.row_galley_cache;
         self.mouse_motion_last = state.mouse_motion_last;
         self.port_unread.remove(&self.active_port);
@@ -286,9 +296,12 @@ pub fn connection_view(
     let mut copy_requested = false;
     let mut pending_input: Vec<Vec<u8>> = Vec::new();
     let mut paste_texts: Vec<String> = Vec::new();
-    let mut context_menu_paste = false;
+    let mut terminal_menu_action = TerminalMenuAction::default();
 
-    // 1. Header bar — ☰ + title + toolbar (click-only, not in Tab focus chain)
+    // 1. Header bar — ☰ + title + selection-action bar + toolbar
+    let show_actions = session
+        .as_ref()
+        .is_some_and(|s| s.touch_state.show_handles);
     ui.horizontal(|ui| {
         if sidebar.show_content_hamburger(SidebarPage::Workspace)
             && sidebar.hamburger(ui).clicked()
@@ -296,13 +309,47 @@ pub fn connection_view(
             sidebar.hamburger_click(SidebarPage::Workspace);
         }
 
-        let title = session.as_ref().map(|s| s.tab_label()).unwrap_or_default();
-        ui.label(
-            egui::RichText::new(title)
-                .size(14.0)
-                .strong()
-                .color(ui.visuals().text_color()),
-        );
+        if show_actions {
+            // Selection mode: show Copy / Paste / Cancel instead of the title.
+            if let Some(session) = session.as_mut() {
+                ui.scope(|ui| {
+                    ui.style_mut().spacing.button_padding = egui::vec2(6.0, 2.0);
+                    if ui
+                        .button(egui::RichText::new(rust_i18n::t!("copy")).size(13.0).strong())
+                        .clicked()
+                    {
+                        copy_selection_to_clipboard(session, &ctx);
+                        ctx.request_repaint();
+                    }
+                    if ui
+                        .button(egui::RichText::new(rust_i18n::t!("paste")).size(13.0))
+                        .clicked()
+                    {
+                        if let Some(text) = read_text() {
+                            paste_to_session(session, &text, &ctx, &mut action);
+                        }
+                    }
+                    if ui
+                        .button(egui::RichText::new(rust_i18n::t!("cancel")).size(13.0))
+                        .clicked()
+                    {
+                        session.touch_state.show_handles = false;
+                        session.touch_state.touch_select_mode = false;
+                        session.selection = None;
+                        session.selection_pointer = None;
+                        ctx.request_repaint();
+                    }
+                });
+            }
+        } else {
+            let title = session.as_ref().map(|s| s.tab_label()).unwrap_or_default();
+            ui.label(
+                egui::RichText::new(title)
+                    .size(14.0)
+                    .strong()
+                    .color(ui.visuals().text_color()),
+            );
+        }
 
         if let Some(session) = session.as_mut() {
             if session.ports.len() > 1 {
@@ -337,44 +384,33 @@ pub fn connection_view(
         }
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Font size quick controls
-            if toolbar_button(ui, "A-").clicked() {
-                *font_size = (*font_size - 1.0).max(8.0);
+            // Font size quick controls. Android uses two-finger pinch instead.
+            #[cfg(not(target_os = "android"))]
+            {
+                if toolbar_button(ui, "A-").clicked() {
+                    *font_size = (*font_size - 1.0).max(8.0);
+                }
+                if toolbar_button(ui, "A+").clicked() {
+                    *font_size = (*font_size + 1.0).min(32.0);
+                }
+                ui.separator();
             }
-            if toolbar_button(ui, "A+").clicked() {
-                *font_size = (*font_size + 1.0).min(32.0);
-            }
-            ui.separator();
 
             // Keyboard toggle and mode
             let kb_icon = if keyboard.visible { "⌨✓" } else { "⌨" };
             if toolbar_button(ui, kb_icon).clicked() {
                 keyboard.toggle();
                 #[cfg(target_os = "android")]
-                if keyboard.visible && !keyboard.android_ime_on {
+                if keyboard.visible && !keyboard.ime_active {
                     sync_android_soft_input(ui.ctx(), false, egui::Rect::NOTHING);
                 }
             }
-            #[cfg(target_os = "android")]
-            {
-                let ime_label = if keyboard.android_ime_on {
-                    "IME✓"
-                } else {
-                    "IME"
-                };
-                if toolbar_button(ui, ime_label).clicked() {
-                    let on = keyboard.toggle_android_ime_on();
-                    if on {
-                        if let Some(session) = session.as_mut() {
-                            session.want_terminal_focus = true;
-                        }
-                    }
-                }
-            }
+            // IME button removed — the system IME is only activated by tapping
+            // the terminal area.  The virtual keyboard toggle (⌨) is below.
             #[cfg(not(target_os = "android"))]
             let show_mode_toggle = true;
             #[cfg(target_os = "android")]
-            let show_mode_toggle = !keyboard.android_ime_on;
+            let show_mode_toggle = true;
             if show_mode_toggle {
                 let mode_label = match keyboard.mode {
                     crate::ui::keyboard::KeyboardMode::Special => "Sp",
@@ -383,10 +419,6 @@ pub fn connection_view(
                 if toolbar_button(ui, mode_label).clicked() {
                     keyboard.toggle_mode();
                 }
-            }
-            #[cfg(target_os = "android")]
-            if keyboard.android_ime_on && keyboard.visible {
-                ui.label(egui::RichText::new("Fn").size(12.0).weak());
             }
 
             if toolbar_button(ui, egui::RichText::new("✕").size(14.0).color(style::RED)).clicked() {
@@ -399,7 +431,7 @@ pub fn connection_view(
     // 2. Measure and resize terminal
     let available = ui.available_size();
     #[cfg(target_os = "android")]
-    let ime_inset = if keyboard.android_ime_on {
+    let ime_inset = if keyboard.ime_active {
         crate::platform::bottom_inset_points(ui.ctx())
     } else {
         0.0
@@ -505,12 +537,21 @@ pub fn connection_view(
         term_resp.mark_changed();
     }
     term_resp = term_resp.on_hover_cursor(egui::CursorIcon::Text);
-    if term_resp.clicked() {
+    if apply_touch_pinch_zoom(&ctx, font_size) {
+        if let Some(session) = session.as_mut() {
+            session.size_label_active = true;
+            session.size_label_hide_at = None;
+        }
+        ctx.request_repaint();
+    }
+    if term_resp.clicked() && !term_resp.long_touched() {
         term_resp.request_focus();
         #[cfg(target_os = "android")]
         {
-            keyboard.set_android_ime_on(true);
-            sync_android_soft_input(ui.ctx(), true, grid_rect);
+            // Activate the system IME once on explicit tap.
+            // Per-frame code below updates the IME rect but never forces a
+            // reopen — if the user dismisses the IME it stays dismissed.
+            keyboard.ime_activation_pending = true;
         }
     }
     if session.as_ref().is_some_and(|s| s.want_terminal_focus) {
@@ -522,6 +563,101 @@ pub fn connection_view(
     }
     let term_focused = term_resp.has_focus()
         || session.as_ref().is_some_and(|s| s.terminal_had_focus);
+
+    // Touch long-press behaviour (works on any device with a touch screen):
+    //
+    //   First long-press on empty text  → select the word under the finger,
+    //                                      enter selection mode, show handles.
+    //   Second long-press on a word that is already selected → open the copy
+    //                                      popup (like a native mobile context menu).
+    let has_touch = ui.input(|i| i.has_touch_screen());
+    if has_touch && term_resp.long_touched() {
+        if let (Some(session), Some(pos)) = (session.as_mut(), term_resp.interact_pointer_pos()) {
+            let inside_selection = session.selection.as_ref().is_some_and(|sel| {
+                is_pos_in_selection(
+                    pos,
+                    sel,
+                    &session.terminal.screen,
+                    session.scroll_offset,
+                    grid_rect,
+                    cell_w,
+                    cell_h,
+                    grid_rows,
+                    grid_cols,
+                )
+            });
+
+            if inside_selection {
+                // Long-press on already-selected text → show copy popup.
+                session.touch_state.show_touch_popup = true;
+                ctx.request_repaint();
+            } else {
+                // First long-press → select a word and show handles.
+                if let Some(sel) = touch_long_press_selection_from_pos(
+                    pos,
+                    &session.terminal.screen,
+                    session.scroll_offset,
+                    grid_rect,
+                    cell_w,
+                    cell_h,
+                    grid_rows,
+                    grid_cols,
+                ) {
+                    session.selection_pointer = Some(sel.anchor);
+                    session.selection = Some(sel);
+                    session.touch_state.touch_select_mode = true;
+                    session.touch_state.show_handles = true;
+                    session.touch_state.scroll_last_pos = None;
+                    session.touch_state.scroll_remainder_rows = 0.0;
+                    session.touch_state.scrolled_this_touch = false;
+                    #[cfg(target_os = "android")]
+                    {
+                        keyboard.ime_active = false;
+                        sync_android_soft_input(ui.ctx(), false, egui::Rect::NOTHING);
+                    }
+                    ctx.request_repaint();
+                }
+            }
+        }
+    }
+
+    // On touch devices: a short tap (not long-press) outside the current selection
+    // clears selection and hides the floating handles.
+    if has_touch && term_resp.clicked() && !term_resp.long_touched() {
+        if let (Some(session), Some(pos)) = (session.as_mut(), term_resp.interact_pointer_pos()) {
+            let inside = session.selection.as_ref().is_some_and(|sel| {
+                is_pos_in_selection(
+                    pos,
+                    sel,
+                    &session.terminal.screen,
+                    session.scroll_offset,
+                    grid_rect,
+                    cell_w,
+                    cell_h,
+                    grid_rows,
+                    grid_cols,
+                )
+            });
+            if !inside {
+                session.selection = None;
+                session.selection_pointer = None;
+                session.touch_state.show_handles = false;
+                session.touch_state.touch_select_mode = false;
+                ctx.request_repaint();
+            }
+        }
+    }
+
+    // When a mouse click happens (non-touch) while touch handles are visible, also
+    // clear the touch-selection state so the handles don't persist across input modes.
+    if !has_touch && term_resp.clicked() {
+        if let Some(session) = session.as_mut() {
+            if session.touch_state.show_handles {
+                session.touch_state.show_handles = false;
+                session.touch_state.touch_select_mode = false;
+            }
+        }
+    }
 
     let has_selection = session
         .as_ref()
@@ -554,6 +690,8 @@ pub fn connection_view(
                 }
                 session.selection = None;
                 session.selection_pointer = None;
+                session.touch_state.show_handles = false;
+                session.touch_state.touch_select_mode = false;
             }
         }
         for text in paste_texts {
@@ -564,35 +702,26 @@ pub fn connection_view(
         }
     }
 
-    // Right-click context menu for copy/paste (paste handled after menu closes)
-    term_resp.context_menu(|ui| {
-        let has_sel = session.as_ref().and_then(|s| s.selection.as_ref()).is_some();
-        if ui.add_enabled(has_sel, egui::Button::new("Copy")).clicked() {
-            if let Some(session) = session.as_mut() {
-                if let Some(ref sel) = session.selection {
-                    let text = sel.text(&session.terminal.screen);
-                    if !text.is_empty() {
-                        write_text(&text);
-                        ctx.copy_text(text);
-                    }
-                    session.selection = None;
-                    session.selection_pointer = None;
-                }
-            }
-            ui.close();
-        }
-        if ui.button("Paste").clicked() {
-            context_menu_paste = true;
-            ui.close();
-        }
-    });
+    // Right-click on desktop opens a context menu; long-press on selected text on
+    // touch devices opens the same popup.
+    let touch_popup = session
+        .as_mut()
+        .is_some_and(|s| std::mem::take(&mut s.touch_state.show_touch_popup));
+    install_terminal_context_menu(
+        ui,
+        &term_resp,
+        has_selection,
+        touch_popup,
+        &mut terminal_menu_action,
+    );
 
-    if context_menu_paste {
-        if let Some(session) = session.as_mut() {
-            if let Some(text) = read_text() {
-                paste_to_session(session, &text, &ctx, &mut action);
-            }
-        }
+    if let Some(session) = session.as_mut() {
+        apply_terminal_menu_action(
+            session,
+            &ctx,
+            &mut action,
+            terminal_menu_action,
+        );
     }
 
     if let Some(session) = session.as_mut() {
@@ -657,6 +786,19 @@ pub fn connection_view(
             };
             session.scroll_offset = session.scroll_offset.min(max_scroll_offset);
             let mouse_to_pty = screen.mouse_tracking_active() && !modifiers.shift;
+            if process_touch_scroll(
+                ui,
+                &term_resp,
+                grid_rect,
+                cell_h,
+                screen,
+                in_alt,
+                max_scroll_offset,
+                &mut session.scroll_offset,
+                &mut session.touch_state,
+            ) {
+                ctx.request_repaint();
+            }
             let mut wheel_input: Vec<Vec<u8>> = Vec::new();
             process_terminal_wheel(
                 &term_resp,
@@ -756,11 +898,30 @@ pub fn connection_view(
             // Selection highlight
             if let Some(ref sel) = session.selection {
                 paint_selection(&painter, screen, theme, grid_rect, cell_w, cell_h, offset, sel);
+                if session.touch_state.show_handles {
+                    paint_selection_handles(
+                        &painter,
+                        screen,
+                        grid_rect,
+                        cell_w,
+                        cell_h,
+                        offset,
+                        sel,
+                    );
+                }
             }
 
             // Selection from mouse/touch (disabled while mouse reporting unless Shift).
             if !mouse_to_pty {
-                update_terminal_selection(
+                let touch_selection_enabled = if has_touch {
+                    session.touch_state.touch_select_mode
+                } else {
+                    true
+                };
+                // Save the prior selection so we can restore it if a touch tap
+                // inside the existing selection would otherwise collapse it.
+                let prev_selection = session.selection.clone();
+                let finished_touch_selection = update_terminal_selection(
                     &mut session.selection,
                     &mut session.selection_pointer,
                     screen,
@@ -772,7 +933,28 @@ pub fn connection_view(
                     cell_h,
                     grid_rows,
                     grid_cols,
+                    touch_selection_enabled,
                 );
+                // Keep touch_select_mode active after the initial long-press so
+                // the user can drag to adjust the selection.  Only cleared when
+                // tapping outside the selection or explicitly copying / clearing.
+                if has_touch && finished_touch_selection && !session.touch_state.show_handles {
+                    session.touch_state.touch_select_mode = false;
+                }
+                // If we are in touch selection mode with handles, a short tap
+                // inside the existing selection must not replace it with a
+                // zero-width (single-cell) selection.  Restore the previous one.
+                if has_touch
+                    && session.touch_state.show_handles
+                    && session
+                        .selection
+                        .as_ref()
+                        .is_some_and(|s| s.anchor == s.cursor)
+                {
+                    if let Some(prev) = prev_selection {
+                        session.selection = Some(prev);
+                    }
+                }
             }
 
             if show_size_label {
@@ -844,14 +1026,24 @@ pub fn connection_view(
         lock_terminal_focus(ui.ctx());
     }
     #[cfg(target_os = "android")]
-    if term_focused {
-        sync_android_soft_input(
-            ui.ctx(),
-            keyboard.android_ime_on,
-            grid_rect,
-        );
-    } else {
-        sync_android_soft_input(ui.ctx(), false, egui::Rect::NOTHING);
+    {
+        // Only enable the IME when the user explicitly tapped the terminal.
+        if keyboard.ime_activation_pending && term_resp.has_focus() {
+            keyboard.ime_activation_pending = false;
+            keyboard.ime_active = true;
+            sync_android_soft_input(ui.ctx(), true, grid_rect);
+        }
+
+        if keyboard.ime_active && term_resp.has_focus() {
+            // Keep the IME rect updated (e.g. after resize) but do NOT
+            // re-send IMEAllowed(true) — that would force-reopen if the
+            // user dismissed the keyboard.
+            ctx.send_viewport_cmd(
+                egui::viewport::ViewportCommand::IMERect(grid_rect),
+            );
+        } else {
+            sync_android_soft_input(ui.ctx(), false, egui::Rect::NOTHING);
+        }
     }
 
     action
@@ -887,6 +1079,119 @@ fn size_label_visible(
 }
 
 /// Header control: clickable but not in keyboard focus navigation (Tab/arrows).
+#[derive(Default, Clone, Copy)]
+struct TerminalMenuAction {
+    copy: bool,
+    paste: bool,
+    clear_selection: bool,
+}
+
+fn install_terminal_context_menu(
+    ui: &egui::Ui,
+    resp: &egui::Response,
+    has_selection: bool,
+    force_popup: bool,
+    action: &mut TerminalMenuAction,
+) {
+    let menu_id = resp.id.with("terminal_ctx_popup");
+    let is_touch = ui.input(|i| i.has_touch_screen());
+
+    // Desktop right-click opens the popup (not on touch, where secondary_clicked
+    // may also fire on long-press on some backends).
+    let right_clicked = resp.secondary_clicked() && !is_touch;
+
+    // Touch long-press on already-selected text (set by the long_touched handler).
+    let touch_trigger = force_popup;
+
+    let open_cmd = (right_clicked || touch_trigger)
+        .then_some(egui::SetOpenCommand::Bool(true));
+
+    egui::Popup::from_response(resp)
+        .id(menu_id)
+        .open_memory(open_cmd)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.set_min_width(150.0);
+            terminal_context_menu_contents(ui, has_selection, action);
+        });
+}
+
+fn terminal_context_menu_contents(
+    ui: &mut egui::Ui,
+    has_selection: bool,
+    action: &mut TerminalMenuAction,
+) {
+    if ui
+        .add_enabled(has_selection, egui::Button::new(rust_i18n::t!("copy")))
+        .clicked()
+    {
+        action.copy = true;
+        ui.close();
+    }
+    if ui.button(rust_i18n::t!("paste")).clicked() {
+        action.paste = true;
+        ui.close();
+    }
+    if ui
+        .add_enabled(has_selection, egui::Button::new(rust_i18n::t!("clear_selection")))
+        .clicked()
+    {
+        action.clear_selection = true;
+        ui.close();
+    }
+}
+
+fn apply_terminal_menu_action(
+    session: &mut ActiveSession,
+    ctx: &egui::Context,
+    action: &mut ConnectionViewAction,
+    menu_action: TerminalMenuAction,
+) {
+    if menu_action.copy {
+        copy_selection_to_clipboard(session, ctx);
+    }
+
+    if menu_action.paste {
+        if let Some(text) = read_text() {
+            paste_to_session(session, &text, ctx, action);
+        }
+    }
+
+    if menu_action.clear_selection {
+        session.selection = None;
+        session.selection_pointer = None;
+        session.touch_state.show_handles = false;
+        session.touch_state.touch_select_mode = false;
+    }
+}
+
+fn copy_selection_to_clipboard(session: &mut ActiveSession, ctx: &egui::Context) {
+    if let Some(ref sel) = session.selection {
+        let text = sel.text(&session.terminal.screen);
+        if !text.is_empty() {
+            write_text(&text);
+            ctx.copy_text(text);
+        }
+    }
+    session.selection = None;
+    session.selection_pointer = None;
+    session.touch_state.show_handles = false;
+    session.touch_state.touch_select_mode = false;
+}
+
+fn apply_touch_pinch_zoom(ctx: &egui::Context, font_size: &mut f32) -> bool {
+    let zoom_delta = ctx.input(|i| i.zoom_delta());
+    if !zoom_delta.is_finite() || (zoom_delta - 1.0).abs() < 0.01 {
+        return false;
+    }
+    let next = (*font_size * zoom_delta).clamp(8.0, 32.0);
+    if (next - *font_size).abs() < 0.05 {
+        return false;
+    }
+    *font_size = next;
+    true
+}
+
 fn toolbar_button(ui: &mut egui::Ui, label: impl Into<egui::WidgetText>) -> egui::Response {
     ui.add(
         egui::Button::new(label.into())

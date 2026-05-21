@@ -51,7 +51,11 @@ pub struct VirtualKeyboard {
     layer: Layer,
     /// Android system IME is active: virtual keyboard is limited to function keys only.
     #[cfg(target_os = "android")]
-    pub android_ime_on: bool,
+    pub ime_active: bool,
+    /// Set to `true` for one frame when the user tapped the terminal area;
+    /// the per-frame IME sync code will activate the IME and clear this flag.
+    #[cfg(target_os = "android")]
+    pub ime_activation_pending: bool,
 }
 
 impl VirtualKeyboard {
@@ -64,31 +68,19 @@ impl VirtualKeyboard {
             show_fn: false,
             layer: Layer::Alpha,
             #[cfg(target_os = "android")]
-            android_ime_on: false,
+            ime_active: false,
+            #[cfg(target_os = "android")]
+            ime_activation_pending: false,
         }
     }
 
     /// Layout mode used for sizing and painting (IME on Android ⇒ function keys only).
     pub fn effective_mode(&self) -> KeyboardMode {
         #[cfg(target_os = "android")]
-        if self.android_ime_on {
+        if self.ime_active {
             return KeyboardMode::Special;
         }
         self.mode
-    }
-
-    #[cfg(target_os = "android")]
-    pub fn set_android_ime_on(&mut self, on: bool) {
-        self.android_ime_on = on;
-        if on {
-            self.mode = KeyboardMode::Special;
-        }
-    }
-
-    #[cfg(target_os = "android")]
-    pub fn toggle_android_ime_on(&mut self) -> bool {
-        self.set_android_ime_on(!self.android_ime_on);
-        self.android_ime_on
     }
 
     /// Sticky Ctrl from the on-screen keyboard (used with system IME on Android).
@@ -98,18 +90,9 @@ impl VirtualKeyboard {
 
     pub fn toggle(&mut self) {
         self.visible = !self.visible;
-        #[cfg(target_os = "android")]
-        if self.visible && self.android_ime_on {
-            self.mode = KeyboardMode::Special;
-        }
     }
 
     pub fn toggle_mode(&mut self) {
-        #[cfg(target_os = "android")]
-        if self.android_ime_on {
-            self.mode = KeyboardMode::Special;
-            return;
-        }
         self.mode = match self.mode {
             KeyboardMode::Special => KeyboardMode::Full,
             KeyboardMode::Full => KeyboardMode::Special,
@@ -136,12 +119,7 @@ impl VirtualKeyboard {
     fn row_count(&self) -> u32 {
         match self.effective_mode() {
             KeyboardMode::Special => {
-                2 + u32::from(
-                    #[cfg(target_os = "android")]
-                    self.android_ime_on,
-                    #[cfg(not(target_os = "android"))]
-                    false,
-                )
+                2
             }
             KeyboardMode::Full => {
                 let main_rows = match self.layer {
@@ -250,18 +228,6 @@ impl VirtualKeyboard {
             key("↵", KeyAction::Bytes(b"\r"), 1.15),
         ];
         self.paint_row(ui, &m, &row2, &mut output);
-
-        #[cfg(target_os = "android")]
-        if self.android_ime_on {
-            let m3 = KeyMetrics::for_width(avail, 8.0, false);
-            let row3 = [
-                key("^C", KeyAction::Bytes(b"\x03"), 1.0),
-                key("^D", KeyAction::Bytes(b"\x04"), 1.0),
-                key("^Z", KeyAction::Bytes(b"\x1a"), 1.0),
-                key("^L", KeyAction::Bytes(b"\x0c"), 1.0),
-            ];
-            self.paint_row(ui, &m3, &row3, &mut output);
-        }
 
         output
     }
