@@ -1,7 +1,7 @@
 use crate::session::WorkspaceSession;
 use crate::ui::widget::sidebar::Sidebar;
 use crate::ui::widget::sidebar::SidebarPage;
-use crate::ui::widget::sidebar::common::{sidebar_brand_row, sidebar_sessions_panel, SidebarSessionAction};
+use crate::ui::widget::sidebar::common::{nav_button, sidebar_brand_row, sidebar_sessions_panel};
 use crate::ui::widget::style;
 
 pub struct TerminalSidebarAction {
@@ -11,42 +11,6 @@ pub struct TerminalSidebarAction {
     pub go_home: bool,
     /// User tapped Settings in the sidebar (app chooses full page vs side panel).
     pub settings_toggled: bool,
-}
-
-fn nav_button(ui: &mut egui::Ui, icon: &str, label: &str, selected: bool) -> egui::Response {
-    let height = 36.0;
-    let width = ui.available_width();
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
-
-    if ui.is_rect_visible(rect) {
-        let bg = if selected {
-            ui.visuals().selection.bg_fill.gamma_multiply(0.35)
-        } else if resp.hovered() {
-            ui.visuals().widgets.hovered.bg_fill
-        } else {
-            egui::Color32::TRANSPARENT
-        };
-        if bg != egui::Color32::TRANSPARENT {
-            ui.painter().rect_filled(rect, style::CORNER_RADIUS_XS, bg);
-        }
-
-        let text = format!("{icon}  {label}");
-        let color = if selected {
-            ui.visuals().selection.stroke.color
-        } else {
-            ui.visuals().weak_text_color()
-        };
-        let galley = ui.fonts_mut(|f| {
-            f.layout(text, egui::FontId::proportional(14.0), color, f32::INFINITY)
-        });
-        ui.painter().galley(
-            egui::pos2(rect.left() + 10.0, rect.center().y - galley.size().y / 2.0),
-            galley,
-            color,
-        );
-    }
-
-    resp
 }
 
 pub fn terminal_sidebar(

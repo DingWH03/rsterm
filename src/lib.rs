@@ -1,5 +1,8 @@
 //! rsTerminal library (desktop `bin` + Android `cdylib`).
 
+// The crate name intentionally uses CamelCase to match the project name.
+#![allow(non_snake_case)]
+
 #![cfg_attr(
     all(target_os = "windows", not(debug_assertions)),
     windows_subsystem = "windows"

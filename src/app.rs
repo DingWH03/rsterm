@@ -581,7 +581,7 @@ impl eframe::App for RsTerminalApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let ctx = ui.ctx();
+        let ctx = ui.ctx().clone();
 
         #[cfg(target_os = "android")]
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -590,9 +590,9 @@ impl eframe::App for RsTerminalApp {
             }
         }
         // Apply UI theme on every frame (cheap — only changes if setting changed).
-        self.settings.ui_theme.apply(ctx);
+        self.settings.ui_theme.apply(&ctx);
         self.sidebar.sync_width(ctx.content_rect().width());
-        show_connection_notice(ctx, &mut self.connection_notice);
+        show_connection_notice(&ctx, &mut self.connection_notice);
 
         // Android status‑bar inset (0 on desktop).
         let top_inset: f32 = {
@@ -604,7 +604,7 @@ impl eframe::App for RsTerminalApp {
         };
 
         let session_count = self.sessions.len();
-        if show_quit_confirm_dialog(ctx, &mut self.show_quit_dialog, session_count) {
+        if show_quit_confirm_dialog(&ctx, &mut self.show_quit_dialog, session_count) {
             self.quit_after_close = true;
             self.close_all_sessions();
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -623,31 +623,35 @@ impl eframe::App for RsTerminalApp {
                 let mut selected_conn_id: Option<String> = None;
                 let mut card_menu = HomeCardMenuAction::default();
 
+                let mut home_sidebar_result =
+                    None::<crate::ui::page::home::sidebar::HomeSidebarResult>;
                 if self.sidebar.docked_visible(SidebarPage::Home) {
-                    egui::SidePanel::left("home_sidebar")
-                        .min_width(DOCK_WIDTH)
-                        .max_width(280.0)
+                    egui::Panel::left("home_sidebar")
+                        .min_size(DOCK_WIDTH)
+                        .max_size(280.0)
                         .resizable(false)
-                        .show(ctx, |ui| {
-                            ui.add_space(top_inset);
-                            let r = paint_home_sidebar(
-                                ui,
+                        .show_inside(ui, |panel_ui| {
+                            panel_ui.add_space(top_inset);
+                            home_sidebar_result = Some(paint_home_sidebar(
+                                panel_ui,
                                 &mut self.sidebar,
                                 false,
                                 !self.home_settings,
                                 self.home_settings,
                                 &self.sessions,
                                 self.active_session_id.as_deref(),
-                            );
-                            self.handle_home_sidebar_result(r, false);
+                            ));
                         });
+                }
+                if let Some(r) = home_sidebar_result {
+                    self.handle_home_sidebar_result(r, false);
                 }
 
                 if self.sidebar.overlay_visible() {
-                    if Sidebar::overlay_backdrop_clicked(ctx, egui::Id::new("home_overlay_backdrop")) {
+                    if Sidebar::overlay_backdrop_clicked(&ctx, egui::Id::new("home_overlay_backdrop")) {
                         self.sidebar.close_overlay();
                     }
-                    Sidebar::show_overlay(ctx, "home_sidebar_overlay", |ui| {
+                    Sidebar::show_overlay(&ctx, "home_sidebar_overlay", |ui| {
                         let r = paint_home_sidebar(
                             ui,
                             &mut self.sidebar,
@@ -661,7 +665,7 @@ impl eframe::App for RsTerminalApp {
                     });
                 }
 
-                egui::CentralPanel::default().show(ctx, |ui| {
+                egui::CentralPanel::default().show_inside(ui, |ui| {
                     ui.add_space(top_inset);
                     if self.sidebar.show_content_hamburger(SidebarPage::Home) {
                         ui.horizontal(|ui| {
@@ -705,7 +709,7 @@ impl eframe::App for RsTerminalApp {
                     sftp_clicked = Some(id);
                 }
                 if let Some(apply) =
-                    self.local_term_dialog.show(ctx, &self.saved_connections)
+                    self.local_term_dialog.show(&ctx, &self.saved_connections)
                 {
                     self.apply_local_terminal_settings(apply);
                 }
@@ -735,7 +739,7 @@ impl eframe::App for RsTerminalApp {
                     self.saved_connections.retain(|c| c.id != *id);
                     storage::save_connections(&self.saved_connections);
                 }
-                if let Some(new_conn) = self.new_conn_dialog.show(ctx) {
+                if let Some(new_conn) = self.new_conn_dialog.show(&ctx) {
                     if let Some(pos) = self
                         .saved_connections
                         .iter()
@@ -765,11 +769,11 @@ impl eframe::App for RsTerminalApp {
                 };
 
                 if self.sidebar.docked_visible(SidebarPage::Workspace) {
-                    egui::SidePanel::left("workspace_sidebar")
-                        .min_width(DOCK_WIDTH)
-                        .max_width(300.0)
+                    egui::Panel::left("workspace_sidebar")
+                        .min_size(DOCK_WIDTH)
+                        .max_size(300.0)
                         .resizable(true)
-                        .show(ctx, |ui| {
+                        .show_inside(ui, |ui| {
                             ui.add_space(top_inset);
                             sidebar_action = terminal_sidebar(
                                 ui,
@@ -782,11 +786,11 @@ impl eframe::App for RsTerminalApp {
                 }
 
                 if self.sidebar.overlay_visible() {
-                    if Sidebar::overlay_backdrop_clicked(ctx, egui::Id::new("workspace_overlay_backdrop"))
+                    if Sidebar::overlay_backdrop_clicked(&ctx, egui::Id::new("workspace_overlay_backdrop"))
                     {
                         self.sidebar.close_overlay();
                     }
-                    Sidebar::show_overlay(ctx, "workspace_sidebar_overlay", |ui| {
+                    Sidebar::show_overlay(&ctx, "workspace_sidebar_overlay", |ui| {
                         sidebar_action = terminal_sidebar(
                             ui,
                             &mut self.sidebar,
@@ -810,11 +814,11 @@ impl eframe::App for RsTerminalApp {
 
                 if self.sidebar.wide && self.settings_open && !self.workspace_settings {
                     let mut close_settings = false;
-                    egui::SidePanel::right("workspace_settings_panel")
-                        .min_width(300.0)
-                        .max_width(420.0)
+                    egui::Panel::right("workspace_settings_panel")
+                        .min_size(300.0)
+                        .max_size(420.0)
                         .resizable(true)
-                        .show(ctx, |ui| {
+                        .show_inside(ui, |ui| {
                             close_settings = settings_side_panel(ui, &mut self.settings);
                         });
                     if close_settings {
@@ -830,7 +834,7 @@ impl eframe::App for RsTerminalApp {
                     }
                 }
 
-                egui::CentralPanel::default().show(ctx, |ui| {
+                egui::CentralPanel::default().show_inside(ui, |ui| {
                     ui.add_space(top_inset);
                     if self.workspace_settings {
                         if settings_page(ui, &mut self.settings) {

@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::{CursorStyle, TerminalTheme};
 use crate::connection::{ConnIn, ConnectionPort, ConnectionPortKind, ConnectionState};
+use crate::session::{FileManagerMode, FileManagerSession};
 use crate::storage::types::ConnectionType;
 use crate::terminal::parser::TermEvent;
 use crate::fonts;
@@ -129,6 +130,56 @@ pub enum ConnectionViewAction {
     None,
     /// Close the session currently shown in the terminal panel.
     CloseSession,
+}
+
+/// A workspace tab: either a terminal emulator or a file manager.
+pub enum WorkspaceSession {
+    Terminal(ActiveSession),
+    FileManager(FileManagerSession),
+}
+
+impl WorkspaceSession {
+    pub fn id(&self) -> &str {
+        match self {
+            WorkspaceSession::Terminal(s) => &s.id,
+            WorkspaceSession::FileManager(s) => &s.id,
+        }
+    }
+
+    pub fn tab_label(&self) -> String {
+        match self {
+            WorkspaceSession::Terminal(s) => s.tab_label(),
+            WorkspaceSession::FileManager(s) => s.tab_label(),
+        }
+    }
+
+    pub fn icon(&self) -> &str {
+        match self {
+            WorkspaceSession::Terminal(s) => s.conn_type.icon(),
+            WorkspaceSession::FileManager(s) => match s.mode {
+                FileManagerMode::SshSftp => "📁",
+                FileManagerMode::LocalDual => "📂",
+            },
+        }
+    }
+
+    pub fn sidebar_has_new_window(&self) -> bool {
+        match self {
+            WorkspaceSession::Terminal(s) => s.sidebar_has_new_window(),
+            WorkspaceSession::FileManager(_) => true,
+        }
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, WorkspaceSession::Terminal(_))
+    }
+
+    pub fn terminal_mut(&mut self) -> Option<&mut ActiveSession> {
+        match self {
+            WorkspaceSession::Terminal(s) => Some(s),
+            _ => None,
+        }
+    }
 }
 
 impl ActiveSession {
