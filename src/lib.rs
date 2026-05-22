@@ -48,6 +48,7 @@ pub fn run_app(native_options: eframe::NativeOptions) {
 #[cfg(not(target_os = "android"))]
 pub fn run_desktop() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    crate::platform::init_platform();
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -68,20 +69,8 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
         android_logger::Config::default().with_max_level(log::LevelFilter::Info),
     );
 
-    // -- Initialise platform services -----------------------------------
-    platform::init_android_ime(app.clone());
-    platform::ensure_storage_access(&app);
-    platform::ensure_bluetooth_access(&app);
-
-    // Initialise btleplug (Droidplug) for BLE scanning/connection.
-    // Android NativeActivity threads are not guaranteed to already have a JNIEnv,
-    // so the helper attaches the current thread when needed.
-    //
-    // IMPORTANT: cache the app ClassLoader from the Activity *before* any
-    // FindClass call, because NativeActivity's main thread may not have the
-    // app's class loader either.
-    platform::cache_android_class_loader(&app);
-    platform::init_android_btleplug(app.vm_as_ptr());
+    // -- Initialise platform trait + Android services --------------------
+    platform::init_android_platform(&app);
 
     // -- Initialise persistent config path ------------------------------
     // Android NativeActivity does NOT set $HOME / $XDG_CONFIG_HOME, so

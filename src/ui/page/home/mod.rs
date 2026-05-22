@@ -28,7 +28,7 @@ pub fn home_screen(
     let _ = settings_clicked;
 
 
-    if platform::capabilities().local_terminal {
+    if platform::get().supports_local_terminal() {
         let (local_body, local_file) =
             render_local_terminal_card(ui, selected_conn_id.is_none(), card_menu);
         if local_body.clicked() && !local_file.clicked() {

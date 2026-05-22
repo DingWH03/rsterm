@@ -1,6 +1,5 @@
 use std::sync::mpsc;
 
-use crate::platform::{self, Capabilities};
 use crate::storage::types::{ConnectionType, SavedConnection};
 use crate::connection::enumeration::{enumerate_serial_ports, scan_ble_devices_blocking};
 use crate::ui::widget::style;
@@ -82,25 +81,25 @@ impl NewConnectionDialog {
         self.ble_device = conn.ble_device.clone().unwrap_or_default();
     }
 
-    fn available_types(caps: &Capabilities) -> Vec<ConnectionType> {
+    fn available_types() -> Vec<ConnectionType> {
         let mut types = Vec::new();
-        if caps.local_terminal {
+        if crate::platform::get().supports_local_terminal() {
             types.push(ConnectionType::Local);
         }
-        if caps.ssh {
+        if true /* SSH always supported */ {
             types.push(ConnectionType::Ssh);
         }
-        if caps.serial {
+        if crate::platform::get().supports_serial() {
             types.push(ConnectionType::Serial);
         }
-        if caps.ble {
+        if crate::platform::get().supports_ble() {
             types.push(ConnectionType::Ble);
         }
         types
     }
 
     fn ensure_conn_type_supported(&mut self) {
-        let types = Self::available_types(&platform::capabilities());
+        let types = Self::available_types();
         if types.is_empty() {
             return;
         }
@@ -120,7 +119,6 @@ impl NewConnectionDialog {
             self.refresh_serial_devices();
         }
 
-        let caps = platform::capabilities();
         let mut result = None;
         let mut close = false;
 
@@ -142,7 +140,7 @@ impl NewConnectionDialog {
                 let editing = self.edit_id.is_some();
                 ui.horizontal(|ui| {
                     ui.label(rust_i18n::t!("dialog_type"));
-                    for ct in Self::available_types(&caps) {
+                    for ct in Self::available_types() {
                         let selected = self.conn_type == ct;
                         let text_color = if selected {
                             ui.visuals().selection.stroke.color
@@ -417,8 +415,8 @@ impl NewConnectionDialog {
         #[cfg(target_os = "android")]
         {
             log::info!("start_ble_scan: checking bluetooth permission");
-            if !crate::platform::has_bluetooth_access() {
-                crate::platform::request_bluetooth_access();
+            if !crate::platform::get().has_bluetooth_access() {
+                crate::platform::get().request_bluetooth_access();
                 self.ble_scan_error = Some(
                     "需要授予附近设备/蓝牙权限后才能扫描。请同意权限弹窗后再点一次扫描。"
                         .to_string(),
@@ -550,7 +548,7 @@ impl LocalTerminalSettingsDialog {
             self.fill_fields(Some(&c.id), None, None, connections);
         } else {
             self.profile_id = None;
-            self.shell = crate::platform::default_shell();
+            self.shell = crate::platform::get().default_shell();
             self.working_dir.clear();
         }
     }
@@ -572,7 +570,7 @@ impl LocalTerminalSettingsDialog {
         }
         self.shell = shell
             .map(|s| s.to_string())
-            .unwrap_or_else(crate::platform::default_shell);
+            .unwrap_or_else(|| crate::platform::get().default_shell());
         self.working_dir = working_dir.unwrap_or_default().to_string();
     }
 

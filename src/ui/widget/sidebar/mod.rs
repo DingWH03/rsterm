@@ -119,7 +119,7 @@ impl Sidebar {
         let top_inset = {
             #[cfg(target_os = "android")]
             {
-                crate::platform::top_inset_points(ctx)
+                crate::platform::get().top_inset_points(ctx)
             }
             #[cfg(not(target_os = "android"))]
             {

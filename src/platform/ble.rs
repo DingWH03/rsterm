@@ -21,15 +21,8 @@ pub fn scan_ble_devices_blocking() -> Result<Vec<String>, String> {
 }
 
 async fn scan_ble_async() -> Result<Vec<String>, String> {
-    #[cfg(target_os = "android")]
-    {
-        log::info!("BLE scan: initializing btleplug Android backend");
-        if let Err(e) = crate::platform::ensure_android_btleplug_initialized() {
-            log::error!("BLE scan: btleplug init failed: {e}");
-            return Err(e);
-        }
-        log::info!("BLE scan: btleplug initialized OK");
-    }
+    // BLE initialisation is handled by the Platform trait impl
+    // (AndroidPlatform::scan_ble_devices calls ensure_initialized beforehand).
 
     use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
     use btleplug::platform::Manager;

@@ -20,7 +20,7 @@ pub fn signal_winch(master_fd: i32, shell_pid: Option<u32>) {
     }
     #[cfg(target_os = "linux")]
     if let Some(shell) = shell_pid {
-        if let Some(fg) = crate::platform::foreground_process_pid(shell) {
+        if let Some(fg) = crate::platform::get().foreground_process_pid(shell) {
             // Belt-and-suspenders: some setups only deliver SIGWINCH to the leaf process.
             unsafe {
                 libc::kill(fg as i32, libc::SIGWINCH);

@@ -56,7 +56,7 @@ pub fn connect_local(
     let shell = config
         .shell
         .clone()
-        .unwrap_or_else(crate::platform::default_shell);
+        .unwrap_or_else(|| crate::platform::get().default_shell());
 
     let sys = portable_pty::native_pty_system();
     let pair = sys

@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 
 use crate::config::{CursorStyle, TerminalTheme};
 use crate::connection::{ConnIn, ConnectionPort, ConnectionPortKind, ConnectionState};
-use crate::platform::{foreground_command, title_is_idle_host, truncate_label};
 use crate::storage::types::ConnectionType;
 use crate::terminal::parser::TermEvent;
 use crate::fonts;
@@ -264,12 +263,12 @@ impl ActiveSession {
         match self.conn_type {
             ConnectionType::Serial | ConnectionType::Ble => self.name.clone(),
             ConnectionType::Local | ConnectionType::Ssh => {
-                if let Some(cmd) = foreground_command(self.handle.shell_pid) {
-                    return truncate_label(&cmd, 32);
+                if let Some(cmd) = crate::platform::get().foreground_command(self.handle.shell_pid) {
+                    return crate::platform::get().truncate_label(&cmd, 32);
                 }
                 let title = self.terminal.screen.title.trim();
-                if !title.is_empty() && !title_is_idle_host(title, &self.user_at_host) {
-                    return truncate_label(title, 32);
+                if !title.is_empty() && !crate::platform::get().title_is_idle_host(title, &self.user_at_host) {
+                    return crate::platform::get().truncate_label(title, 32);
                 }
                 self.user_at_host.clone()
             }
@@ -438,7 +437,7 @@ pub fn connection_view(
     let available = ui.available_size();
     #[cfg(target_os = "android")]
     let ime_inset = if keyboard.ime_active {
-        crate::platform::bottom_inset_points(ui.ctx())
+        crate::platform::get().bottom_inset_points(ui.ctx())
     } else {
         0.0
     };

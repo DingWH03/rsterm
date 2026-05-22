@@ -541,7 +541,9 @@ pub fn connect_ble(config: &SavedConnection) -> Result<ConnectionHandle, String>
 
         rt.block_on(async move {
             #[cfg(target_os = "android")]
-            if let Err(e) = crate::platform::ensure_android_btleplug_initialized() {
+            // Android BLE init is handled by Platform trait init.
+            #[cfg(target_os = "android")]
+            if let Err(e) = crate::platform::get().ensure_btleplug_ready() {
                 let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(e)));
                 return;
             }

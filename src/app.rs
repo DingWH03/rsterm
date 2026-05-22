@@ -251,7 +251,7 @@ impl RsTerminalApp {
                 term.handle = handle;
                 term.saved_conn_id = Some(config.id.clone());
                 term.name = config.name.clone();
-                term.user_at_host = crate::platform::local_user_at_host();
+                term.user_at_host = crate::platform::get().local_user_at_host();
                 term.want_terminal_focus = true;
                 term.selection = None;
                 term.selection_pointer = None;
@@ -320,11 +320,11 @@ impl RsTerminalApp {
         self.virtual_keyboard = VirtualKeyboard::new(profile.keyboard_mode);
 
         let user_at_host = match config.conn_type {
-            ConnectionType::Local => crate::platform::local_user_at_host(),
+            ConnectionType::Local => crate::platform::get().local_user_at_host(),
             ConnectionType::Ssh => {
                 let user = config.ssh_user.as_deref().unwrap_or("root");
                 let host = config.ssh_host.as_deref().unwrap_or("host");
-                crate::platform::ssh_user_at_host(user, host)
+                crate::platform::get().ssh_user_at_host(user, host)
             }
             _ => String::new(),
         };
@@ -597,7 +597,7 @@ impl eframe::App for RsTerminalApp {
         // Android status‑bar inset (0 on desktop).
         let top_inset: f32 = {
             #[cfg(target_os = "android")] {
-                crate::platform::top_inset_points(ctx)
+                crate::platform::get().top_inset_points(ctx)
             }
             #[cfg(not(target_os = "android"))]
             { 0.0 }
