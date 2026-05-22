@@ -1,3 +1,9 @@
+pub mod grid;
+pub mod input;
+pub mod mouse;
+pub mod paint;
+pub mod selection;
+
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
@@ -10,20 +16,20 @@ use crate::fonts;
 use crate::terminal::cursor::paint_cursor;
 use crate::terminal::metrics::measure_cell;
 use crate::terminal::{Terminal, DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS};
-use crate::ui::terminal_grid::{apply_resize, drain_after_resize};
-use crate::ui::clipboard::{read_text, write_text};
-use crate::ui::keyboard::VirtualKeyboard;
-use crate::ui::sidebar::{Sidebar, SidebarPage};
-use crate::ui::style;
-use crate::ui::terminal_input::{
+use crate::ui::page::terminal::grid::{apply_resize, drain_after_resize};
+use crate::ui::widget::clipboard::{read_text, write_text};
+use crate::ui::widget::keyboard::VirtualKeyboard;
+use crate::ui::widget::sidebar::{Sidebar, SidebarPage};
+use crate::ui::widget::style;
+use crate::ui::page::terminal::input::{
     allocate_terminal_surface, lock_terminal_focus, process_keyboard_input,
     sync_android_soft_input, terminal_widget_id, TERMINAL_GRID_MARGIN,
 };
-use crate::ui::terminal_paint::{paint_row, RowGalleyCache};
-use crate::ui::terminal_mouse::{
+use crate::ui::page::terminal::paint::{paint_row, RowGalleyCache};
+use crate::ui::page::terminal::mouse::{
     process_terminal_mouse, process_terminal_wheel, process_touch_scroll,
 };
-use crate::ui::terminal_selection::{
+use crate::ui::page::terminal::selection::{
     CellPos, TerminalSelection, TerminalTouchState, is_pos_in_selection,
     paint_selection, paint_selection_handles, paste_payload,
     touch_long_press_selection_from_pos, update_terminal_selection,
@@ -413,8 +419,8 @@ pub fn connection_view(
             let show_mode_toggle = true;
             if show_mode_toggle {
                 let mode_label = match keyboard.mode {
-                    crate::ui::keyboard::KeyboardMode::Special => "Sp",
-                    crate::ui::keyboard::KeyboardMode::Full => "Full",
+                    crate::ui::widget::keyboard::KeyboardMode::Special => "Sp",
+                    crate::ui::widget::keyboard::KeyboardMode::Full => "Full",
                 };
                 if toolbar_button(ui, mode_label).clicked() {
                     keyboard.toggle_mode();

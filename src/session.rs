@@ -7,7 +7,7 @@ use std::thread::JoinHandle;
 use crate::fs::sftp::SftpClient;
 use crate::fs::{home_dir, FileEntry};
 use crate::storage::types::ConnectionType;
-use crate::ui::connection_view::ActiveSession;
+use crate::ui::page::terminal::ActiveSession;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PaneSide {

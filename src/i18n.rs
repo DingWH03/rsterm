@@ -99,7 +99,7 @@ impl UiTheme {
         // ── Modern dark-theme refinements ────────────────────────────────────
         // Only customise when the user is on a dark theme (light theme is fine as-is).
         if theme.dark_mode {
-            use crate::ui::style;
+            use crate::ui::widget::style;
 
             // Window / panel backgrounds
             theme.window_fill = style::SURFACE_0;

@@ -2,8 +2,8 @@
 
 use egui::{Context, Event, EventFilter, Id, Key, Modifiers, Sense, Ui, Vec2};
 
-use crate::ui::clipboard::read_text;
-use crate::ui::keyboard::ctrl_byte_for_char;
+use crate::ui::widget::clipboard::read_text;
+use crate::ui::widget::keyboard::ctrl_byte_for_char;
 
 /// Stable focus id (must not depend on parent `Ui` id).
 pub fn terminal_widget_id() -> Id {

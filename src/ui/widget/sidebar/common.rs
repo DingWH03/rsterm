@@ -1,7 +1,7 @@
 use crate::session::WorkspaceSession;
-use crate::ui::sidebar::Sidebar;
-use crate::ui::sidebar::SidebarPage;
-use crate::ui::style;
+use crate::ui::widget::sidebar::Sidebar;
+use crate::ui::widget::sidebar::SidebarPage;
+use crate::ui::widget::style;
 
 /// Reserved width for action buttons on the right of each row.
 const SESSION_ACTIONS_WIDTH: f32 = 52.0;

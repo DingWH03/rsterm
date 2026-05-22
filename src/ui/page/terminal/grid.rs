@@ -1,4 +1,4 @@
-use crate::ui::connection_view::{ActiveSession, ConnectionViewAction};
+use crate::ui::page::terminal::{ActiveSession, ConnectionViewAction};
 
 pub fn sync_emulator_grid(session: &mut ActiveSession, rows: usize, cols: usize, font_size: f32) {
     let rows = rows.max(1);

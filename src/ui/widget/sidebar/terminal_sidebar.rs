@@ -1,8 +1,8 @@
 use crate::session::WorkspaceSession;
-use crate::ui::sidebar::Sidebar;
-use crate::ui::sidebar::SidebarPage;
-use crate::ui::sidebar_common::{sidebar_brand_row, sidebar_sessions_panel, SidebarSessionAction};
-use crate::ui::style;
+use crate::ui::widget::sidebar::Sidebar;
+use crate::ui::widget::sidebar::SidebarPage;
+use crate::ui::widget::sidebar::common::{sidebar_brand_row, sidebar_sessions_panel, SidebarSessionAction};
+use crate::ui::widget::style;
 
 pub struct TerminalSidebarAction {
     pub select_session: Option<String>,

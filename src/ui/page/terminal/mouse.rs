@@ -3,7 +3,7 @@
 use egui::{PointerButton, Pos2, Rect, Response, TouchPhase, Ui};
 
 use crate::terminal::screen::Screen;
-use crate::ui::terminal_selection::TerminalTouchState;
+use crate::ui::page::terminal::selection::TerminalTouchState;
 
 /// Encode xterm SGR mouse report (`CSI < Cb ; Cx ; Cy M|m`).
 pub fn encode_sgr_mouse(button: u8, col: usize, row: usize, release: bool) -> Vec<u8> {

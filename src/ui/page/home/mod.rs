@@ -1,6 +1,8 @@
+pub mod sidebar;
+
 use crate::platform;
 use crate::storage::types::{ConnectionType, SavedConnection};
-use crate::ui::style;
+use crate::ui::widget::style;
 
 /// Direct actions from per-card toolbar icons (not context menus).
 #[derive(Default)]

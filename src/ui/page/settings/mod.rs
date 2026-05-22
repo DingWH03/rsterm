@@ -2,8 +2,8 @@ use crate::config::{BellStyle, CursorStyle, TerminalTheme, TerminalType};
 use crate::fonts;
 use crate::i18n::Language;
 use crate::settings::{AppSettings, Profile};
-use crate::ui::keyboard::KeyboardMode;
-use crate::ui::style;
+use crate::ui::widget::keyboard::KeyboardMode;
+use crate::ui::widget::style;
 
 // ─── Tab identifiers ──────────────────────────────────────────────────────────
 

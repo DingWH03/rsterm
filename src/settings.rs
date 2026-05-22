@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crate::config::{BellStyle, CursorStyle, TerminalTheme, TerminalType};
 use crate::i18n::{Language, UiTheme};
-use crate::ui::keyboard::KeyboardMode;
+use crate::ui::widget::keyboard::KeyboardMode;
 
 /// A terminal profile — a complete set of terminal appearance and behavior settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,3 +1,5 @@
+pub mod transfer;
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -12,9 +14,9 @@ use crate::session::{
     FileActivePane, FileClipboard, FileClipboardMode, FileManagerMode, FileManagerSession,
     InfoDialog, PaneState, RemotePane, RenameDialog,
 };
-use crate::ui::file_transfer::{apply_transfer_done, PasteTarget};
-use crate::ui::sidebar::{Sidebar, SidebarPage};
-use crate::ui::style;
+use crate::ui::page::file_manager::transfer::{apply_transfer_done, PasteTarget};
+use crate::ui::widget::sidebar::{Sidebar, SidebarPage};
+use crate::ui::widget::style;
 
 #[derive(Default)]
 pub struct FileManagerAction {

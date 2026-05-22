@@ -2,8 +2,8 @@ use std::sync::mpsc;
 
 use crate::platform::{self, Capabilities};
 use crate::storage::types::{ConnectionType, SavedConnection};
-use crate::ui::devices::{enumerate_serial_ports, scan_ble_devices_blocking};
-use crate::ui::style;
+use crate::connection::enumeration::{enumerate_serial_ports, scan_ble_devices_blocking};
+use crate::ui::widget::style;
 
 pub struct NewConnectionDialog {
     pub open: bool,

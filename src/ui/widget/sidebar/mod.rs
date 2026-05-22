@@ -1,6 +1,9 @@
 //! Responsive sidebar: home is pinned when wide; workspace toggles when wide; overlay when narrow.
 
-use crate::ui::style;
+pub mod common;
+pub mod terminal_sidebar;
+
+use crate::ui::widget::style;
 
 pub const WIDE_THRESHOLD: f32 = 720.0;
 pub const DOCK_WIDTH: f32 = 200.0;

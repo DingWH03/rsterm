@@ -8,18 +8,18 @@ use crate::storage::types::{ConnectionType, SavedConnection};
 use crate::terminal::{DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS};
 use crate::terminal::Terminal;
 use crate::session::{FileManagerMode, FileManagerSession, WorkspaceSession};
-use crate::ui::connection_view::{
+use crate::ui::page::terminal::{
     drain_connection, ActiveSession, ConnectionViewAction, connection_view,
 };
-use crate::ui::file_manager::{file_manager_view, FileManagerAction};
-use crate::ui::dialogs::{LocalTerminalSettingsDialog, NewConnectionDialog};
-use crate::ui::home::{home_screen, HomeCardMenuAction};
-use crate::ui::home_sidebar::{paint_home_sidebar, HomeSidebarAction};
-use crate::ui::keyboard::VirtualKeyboard;
-use crate::ui::settings_page::{settings_page, settings_side_panel};
-use crate::ui::sidebar::{Sidebar, SidebarPage, DOCK_WIDTH};
-use crate::ui::style;
-use crate::ui::terminal_sidebar::{terminal_sidebar, TerminalSidebarAction};
+use crate::ui::page::file_manager::{file_manager_view, FileManagerAction};
+use crate::ui::widget::dialogs::{LocalTerminalSettingsDialog, NewConnectionDialog};
+use crate::ui::page::home::{home_screen, HomeCardMenuAction};
+use crate::ui::page::home::sidebar::{paint_home_sidebar, HomeSidebarAction};
+use crate::ui::widget::keyboard::VirtualKeyboard;
+use crate::ui::page::settings::{settings_page, settings_side_panel};
+use crate::ui::widget::sidebar::{Sidebar, SidebarPage, DOCK_WIDTH};
+use crate::ui::widget::style;
+use crate::ui::widget::sidebar::terminal_sidebar::{terminal_sidebar, TerminalSidebarAction};
 use log::info;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -262,7 +262,7 @@ impl RsTerminalApp {
 
     fn apply_local_terminal_settings(
         &mut self,
-        apply: crate::ui::dialogs::LocalTerminalSettingsApply,
+        apply: crate::ui::widget::dialogs::LocalTerminalSettingsApply,
     ) {
         if self
             .saved_connections
@@ -459,7 +459,7 @@ impl RsTerminalApp {
 
     fn apply_session_panel_action(
         &mut self,
-        action: crate::ui::sidebar_common::SidebarSessionAction,
+        action: crate::ui::widget::sidebar::common::SidebarSessionAction,
         in_overlay: bool,
     ) {
         if let Some(id) = action.select_session {
@@ -483,7 +483,7 @@ impl RsTerminalApp {
 
     fn handle_home_sidebar_result(
         &mut self,
-        result: crate::ui::home_sidebar::HomeSidebarResult,
+        result: crate::ui::page::home::sidebar::HomeSidebarResult,
         in_overlay: bool,
     ) {
         match result.nav {
@@ -914,7 +914,7 @@ impl eframe::App for RsTerminalApp {
                 }
 
                 self.apply_session_panel_action(
-                    crate::ui::sidebar_common::SidebarSessionAction {
+                    crate::ui::widget::sidebar::common::SidebarSessionAction {
                         select_session: sidebar_action.select_session,
                         close_session: sidebar_action.close_session,
                         new_window_session: sidebar_action.new_window_session,

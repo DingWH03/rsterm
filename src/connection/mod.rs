@@ -6,6 +6,7 @@ pub mod ssh_keys;
 pub mod winchg;
 pub mod serial;
 pub mod ssh;
+pub mod enumeration;
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
