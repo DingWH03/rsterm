@@ -1,6 +1,5 @@
 pub mod sidebar;
 
-use crate::platform;
 use crate::storage::types::{ConnectionType, SavedConnection};
 use crate::ui::widget::style;
 
@@ -9,6 +8,7 @@ use crate::ui::widget::style;
 pub struct HomeCardMenuAction {
     pub local_fm: bool,
     pub sftp_id: Option<String>,
+    pub toggle_favorite: Option<String>,
 }
 
 pub fn home_screen(
@@ -16,8 +16,6 @@ pub fn home_screen(
     connections: &[SavedConnection],
     selected_conn_id: &mut Option<String>,
     card_menu: &mut HomeCardMenuAction,
-    local_clicked: &mut bool,
-    _local_fm_clicked: &mut bool,
     fab_clicked: &mut bool,
     connect_clicked: &mut Option<String>,
     edit_clicked: &mut Option<String>,
@@ -28,25 +26,35 @@ pub fn home_screen(
     let _ = settings_clicked;
 
 
-    if platform::get().supports_local_terminal() {
-        let (local_body, local_file) =
-            render_local_terminal_card(ui, selected_conn_id.is_none(), card_menu);
-        if local_body.clicked() && !local_file.clicked() {
-            *selected_conn_id = None;
-            *local_clicked = true;
+    // ── Filter chips ────────────────────────────────────────────────────────
+    let filter: Option<ConnectionType> =
+        ui.data(|d| d.get_temp(egui::Id::new("home_filter")))
+            .unwrap_or(None);
+    ui.horizontal(|ui| {
+        ui.style_mut().spacing.item_spacing.x = 4.0;
+        let all_sel = filter.is_none();
+        if ui.selectable_label(all_sel, "All").clicked() {
+            ui.data_mut(|d| d.insert_temp(egui::Id::new("home_filter"), None::<ConnectionType>));
         }
-        local_body.context_menu(|ui| {
-            if ui.button(rust_i18n::t!("connect")).clicked() {
-                *local_clicked = true;
-                ui.close();
+        for ct in [
+            ConnectionType::Local,
+            ConnectionType::Ssh,
+            ConnectionType::Serial,
+            ConnectionType::Ble,
+        ] {
+            let sel = filter.as_ref() == Some(&ct);
+            let short = match ct {
+                ConnectionType::Local => "Local",
+                ConnectionType::Ssh => "SSH",
+                ConnectionType::Serial => "Serial",
+                ConnectionType::Ble => "BLE",
+            };
+            if ui.selectable_label(sel, short).clicked() {
+                ui.data_mut(|d| d.insert_temp(egui::Id::new("home_filter"), Some(ct)));
             }
-            if ui.button(rust_i18n::t!("home_file_manager")).clicked() {
-                card_menu.local_fm = true;
-                ui.close();
-            }
-        });
-        ui.add_space(style::CARD_SPACING);
-    }
+        }
+    });
+    ui.add_space(4.0);
 
     // ── Saved connections section ───────────────────────────────────────────
     if connections.is_empty() {
@@ -71,29 +79,26 @@ pub fn home_screen(
         });
         ui.add_space(8.0);
     } else {
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(rust_i18n::t!("home_saved_connections"))
-                    .size(13.0)
-                    .color(ui.visuals().weak_text_color())
-                    .strong(),
-            );
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new(format!("{}", connections.len()))
-                    .size(11.0)
-                    .color(ui.visuals().weak_text_color()),
-            );
+        // Filter + sort: favorites first, then recent, then alphabetically
+        let mut sorted: Vec<&SavedConnection> = match filter {
+            Some(ref ft) => connections.iter().filter(|c| c.conn_type == *ft).collect(),
+            None => connections.iter().collect(),
+        };
+        sorted.sort_by(|a, b| {
+            b.favorite
+                .cmp(&a.favorite)
+                .then_with(|| b.last_connected.cmp(&a.last_connected))
+                .then_with(|| a.name.cmp(&b.name))
         });
-        ui.add_space(6.0);
+
+        ui.add_space(2.0);
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let mut to_delete: Option<usize> = None;
 
-                for (i, conn) in connections.iter().enumerate() {
+                for (i, conn) in sorted.iter().enumerate() {
                     let selected = selected_conn_id.as_deref() == Some(conn.id.as_str());
                     let (card, file_btn, pencil) = render_connection_card(
                         ui,
@@ -133,7 +138,8 @@ pub fn home_screen(
                 }
 
                 if let Some(i) = to_delete {
-                    *delete_clicked = Some(connections[i].id.clone());
+                    let conn_id = sorted[i].id.clone();
+                    *delete_clicked = Some(conn_id);
                 }
             });
     }
@@ -230,9 +236,12 @@ fn conn_subtitle(conn: &SavedConnection) -> String {
 // ─── Card constants ───────────────────────────────────────────────────────────
 
 const CARD_ICON_FONT: f32 = 22.0;
+const STAR_ICON_FONT: f32 = 16.0;
 
 const FILE_ICON: &str = "\u{1F4C1}";
 const EDIT_ICON: &str = "\u{270E}";
+const STAR_FILLED: &str = "\u{2605}";
+const STAR_EMPTY: &str = "\u{2606}";
 
 // ─── Icon helpers ─────────────────────────────────────────────────────────────
 
@@ -293,91 +302,6 @@ fn paint_card_chrome(
 }
 
 // ─── Local terminal card ──────────────────────────────────────────────────────
-
-fn render_local_terminal_card(
-    ui: &mut egui::Ui,
-    selected: bool,
-    card_menu: &mut HomeCardMenuAction,
-) -> (egui::Response, egui::Response) {
-    // Same style as connection cards — consistency across all cards
-    let desired = egui::vec2(ui.available_width(), style::CARD_HEIGHT);
-    let (rect, resp) = ui.allocate_exact_size(desired, egui::Sense::click());
-
-    let mut file_resp =
-        ui.interact(egui::Rect::NOTHING, ui.id().with("local_file"), egui::Sense::hover());
-
-    if ui.is_rect_visible(rect) {
-        paint_card_chrome(
-            ui,
-            rect,
-            card_fill(ui, selected, resp.hovered()),
-            card_stroke(ui, selected, resp.hovered()),
-        );
-
-        let icon_x = rect.left() + 16.0;
-        let icon_y = rect.center().y;
-
-        // Icon — use accent color like other cards
-        let icon = ui.fonts_mut(|f| {
-            f.layout(
-                "\u{1F4BB}".to_string(),
-                egui::FontId::proportional(CARD_ICON_FONT),
-                style::ACCENT,
-                f32::INFINITY,
-            )
-        });
-        ui.painter_at(rect).galley(
-            egui::pos2(icon_x, icon_y - icon.rect.height() / 2.0),
-            icon,
-            style::ACCENT,
-        );
-
-        let text_left = rect.left() + 56.0;
-        let name_top = rect.top() + 14.0;
-        let sub_top = rect.top() + 42.0;
-
-        // Title
-        let name_g = ui.fonts_mut(|f| {
-            f.layout(
-                rust_i18n::t!("home_local_terminal").to_string(),
-                egui::FontId::proportional(16.0),
-                ui.visuals().text_color(),
-                f32::INFINITY,
-            )
-        });
-        ui.painter_at(rect).galley(
-            egui::pos2(text_left, name_top),
-            name_g,
-            ui.visuals().text_color(),
-        );
-
-        // Subtitle
-        let sub_g = ui.fonts_mut(|f| {
-            f.layout(
-                "Open a local shell session".to_string(),
-                egui::FontId::proportional(13.0),
-                ui.visuals().weak_text_color(),
-                f32::INFINITY,
-            )
-        });
-        ui.painter_at(rect).galley(
-            egui::pos2(text_left, sub_top),
-            sub_g,
-            ui.visuals().weak_text_color(),
-        );
-
-        // File icon in toolbar area
-        let toolbar = style::CardToolbar::layout(rect, true, false);
-        if let Some(file_rect) = toolbar.file {
-            file_resp = paint_file_icon(ui, file_rect, ui.id().with("local_builtin_file"));
-            if file_resp.clicked() {
-                card_menu.local_fm = true;
-            }
-        }
-    }
-
-    (resp, file_resp)
-}
 
 /// Dynamic card background — works in both light and dark themes.
 fn card_fill(ui: &egui::Ui, selected: bool, hovered: bool) -> egui::Color32 {
@@ -448,15 +372,15 @@ fn render_connection_card(
             style::ACCENT,
         );
 
-        let text_left = rect.left() + 56.0;
-        let name_top = rect.top() + 14.0;
-        let sub_top = rect.top() + 42.0;
+        let text_left = rect.left() + 52.0;
+        let name_top = rect.top() + 8.0;
+        let sub_top = rect.top() + 27.0;
 
         // Name
         let name_g = ui.fonts_mut(|f| {
             f.layout(
                 conn.name.clone(),
-                egui::FontId::proportional(15.0),
+                egui::FontId::proportional(14.0),
                 ui.visuals().text_color(),
                 f32::INFINITY,
             )
@@ -473,7 +397,7 @@ fn render_connection_card(
         let sub_g = ui.fonts_mut(|f| {
             f.layout(
                 conn_subtitle(conn),
-                egui::FontId::proportional(12.0),
+                egui::FontId::proportional(11.0),
                 ui.visuals().weak_text_color(),
                 max_text_w,
             )
@@ -484,7 +408,43 @@ fn render_connection_card(
             ui.visuals().weak_text_color(),
         );
 
-        // Toolbar icons
+        // Star (favorite) icon — far right
+        let star_slot = style::ICON_SLOT;
+        let star_x = rect.right() - style::TOOLBAR_MARGIN - star_slot;
+        let star_rect = egui::Rect::from_center_size(
+            egui::pos2(star_x + star_slot / 2.0, rect.center().y),
+            egui::vec2(star_slot, star_slot),
+        );
+        let star_id = ui.id().with(("star", &conn.id));
+        let star_resp = ui.interact(star_rect, star_id, egui::Sense::click());
+        if star_resp.clicked() {
+            card_menu.toggle_favorite = Some(conn.id.clone());
+        }
+        if ui.is_rect_visible(star_rect) {
+            let (star_char, star_color) = if conn.favorite {
+                (STAR_FILLED, egui::Color32::from_rgb(255, 200, 0))
+            } else {
+                (STAR_EMPTY, ui.visuals().weak_text_color())
+            };
+            let star_g = ui.fonts_mut(|f| {
+                f.layout(
+                    star_char.to_string(),
+                    egui::FontId::proportional(STAR_ICON_FONT),
+                    star_color,
+                    f32::INFINITY,
+                )
+            });
+            ui.painter_at(star_rect).galley(
+                egui::pos2(
+                    star_rect.center().x - star_g.size().x / 2.0,
+                    star_rect.center().y - star_g.size().y / 2.0,
+                ),
+                star_g,
+                star_color,
+            );
+        }
+
+        // Toolbar icons (edit, file)
         let toolbar = style::CardToolbar::layout(rect, show_file, true);
 
         if let Some(edit_rect) = toolbar.edit {

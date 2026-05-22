@@ -2,7 +2,7 @@ use crate::session::WorkspaceSession;
 use crate::storage::types::{ConnectionType, SavedConnection};
 use crate::ui::widget::sidebar::Sidebar;
 use crate::ui::widget::sidebar::common::{nav_button, sidebar_brand_row};
-use crate::ui::widget::sidebar::session_list::{paint_session_rows, SessionRowAction};
+use crate::ui::widget::sidebar::session_list::paint_session_rows;
 use crate::ui::widget::style;
 
 // ─── Main view (connection management + sessions + settings) ──────────────────
@@ -36,22 +36,14 @@ pub fn main_sidebar(
 
     // ── Top section (fixed) ──────────────────────────────────────────────────
     sidebar_brand_row(ui, sidebar, false);
-    ui.add_space(6.0);
+    ui.add_space(1.0);
 
-    if nav_button(ui, "\u{1F4CB}", &rust_i18n::t!("connection_mgmt"), false).clicked() {
+    if nav_button(ui, "", &rust_i18n::t!("connection_mgmt"), false).clicked() {
         action.open_connection_mgmt = true;
     }
-    ui.add_space(6.0);
+    ui.add_space(1.0);
     ui.separator();
-    ui.add_space(4.0);
-
-    ui.label(
-        egui::RichText::new(rust_i18n::t!("sidebar_sessions"))
-            .size(11.0)
-            .color(ui.visuals().weak_text_color())
-            .strong(),
-    );
-    ui.add_space(2.0);
+    ui.add_space(1.0);
 
     // ── Sessions area (fills remaining space before bottom section) ──────────
     let top_used = ui.cursor().min.y - ui.max_rect().top();
@@ -75,9 +67,9 @@ pub fn main_sidebar(
     action.new_window_session = sess_action.new_window_session;
 
     // ── Bottom section (fixed) ──────────────────────────────────────────────
-    ui.add_space(4.0);
+    ui.add_space(1.0);
     ui.separator();
-    ui.add_space(4.0);
+    ui.add_space(1.0);
 
     if nav_button(ui, "\u{2699}", &rust_i18n::t!("settings"), on_settings).clicked() {
         action.settings_toggled = true;
@@ -90,12 +82,11 @@ pub fn main_sidebar(
 
 pub struct ConnectionsSidebarAction {
     pub go_back: bool,
+    pub new_connection: bool,
     pub connect_connection: Option<String>,
     pub open_file_mgr: Option<String>,
     pub edit_connection: Option<String>,
     pub delete_connection: Option<String>,
-    pub show_menu: bool,
-    pub menu_conn_id: Option<String>,
 }
 
 /// Full connection list rendered inside the sidebar with a back button,
@@ -106,41 +97,72 @@ pub fn connections_sidebar(
 ) -> ConnectionsSidebarAction {
     let mut action = ConnectionsSidebarAction {
         go_back: false,
+        new_connection: false,
         connect_connection: None,
         open_file_mgr: None,
         edit_connection: None,
         delete_connection: None,
-        show_menu: false,
-        menu_conn_id: None,
     };
 
-    // ── Back button ─────────────────────────────────────────────────────────
-    let back_h = 32.0;
-    let back_rect = egui::Rect::from_min_size(
-        ui.cursor().min,
-        egui::vec2(ui.available_width(), back_h),
-    );
-    let back_resp = ui.allocate_rect(back_rect, egui::Sense::click());
+    // ── Top bar: Back + New Connection ──────────────────────────────────────
+    let top_h = 32.0;
+    let top_w = ui.available_width();
+    let top_rect = ui.allocate_exact_size(egui::vec2(top_w, top_h), egui::Sense::hover()).0;
+
+    // Back button (left half)
+    let back_rect = egui::Rect::from_min_size(top_rect.min, egui::vec2(top_w * 0.5, top_h));
+    let back_resp = ui.interact(back_rect, ui.id().with("conn_back"), egui::Sense::click());
     if back_resp.clicked() {
         action.go_back = true;
     }
-    if ui.is_rect_visible(back_rect) {
+
+    // New Connection button (right half)
+    let new_rect = egui::Rect::from_min_size(
+        egui::pos2(top_rect.center().x, top_rect.top()),
+        egui::vec2(top_w * 0.5, top_h),
+    );
+    let new_resp = ui.interact(new_rect, ui.id().with("conn_new"), egui::Sense::click());
+    if new_resp.clicked() {
+        action.new_connection = true;
+    }
+
+    if ui.is_rect_visible(top_rect) {
         let painter = ui.painter();
+
+        // Back
         if back_resp.hovered() {
             painter.rect_filled(back_rect, style::CORNER_RADIUS_XS, ui.visuals().widgets.hovered.bg_fill);
         }
-        let g = ui.fonts_mut(|f| {
+        let back_g = ui.fonts_mut(|f| {
             f.layout(
                 format!("\u{2190}  {}", rust_i18n::t!("back")),
                 egui::FontId::proportional(14.0),
                 ui.visuals().text_color(),
-                f32::INFINITY,
+                top_w * 0.4,
             )
         });
         painter.galley(
-            egui::pos2(back_rect.left() + 8.0, back_rect.center().y - g.size().y / 2.0),
-            g,
+            egui::pos2(back_rect.left() + 8.0, back_rect.center().y - back_g.size().y / 2.0),
+            back_g,
             ui.visuals().text_color(),
+        );
+
+        // New Connection
+        if new_resp.hovered() {
+            painter.rect_filled(new_rect, style::CORNER_RADIUS_XS, ui.visuals().widgets.hovered.bg_fill);
+        }
+        let new_g = ui.fonts_mut(|f| {
+            f.layout(
+                format!("+  {}", rust_i18n::t!("new_connection")),
+                egui::FontId::proportional(14.0),
+                style::ACCENT,
+                top_w * 0.4,
+            )
+        });
+        painter.galley(
+            egui::pos2(new_rect.right() - 8.0 - new_g.size().x, new_rect.center().y - new_g.size().y / 2.0),
+            new_g,
+            style::ACCENT,
         );
     }
     ui.add_space(4.0);
@@ -199,6 +221,15 @@ pub fn connections_sidebar(
     } else {
         ui.style_mut().spacing.scroll.bar_width = 6.0;
         ui.style_mut().spacing.scroll.bar_outer_margin = 0.0;
+        // Persistent menu state (egui data survives frame boundaries)
+        let menu_id_key = egui::Id::new("conn_menu_id");
+        let menu_state: Option<String> = ui.data(|d| d.get_temp(menu_id_key)).unwrap_or(None);
+
+        // Close menu on next click anywhere
+        if menu_state.is_some() && ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary)) {
+            ui.data_mut(|d| d.insert_temp(menu_id_key, None::<String>));
+        }
+
         egui::ScrollArea::vertical()
             .id_salt("sidebar_conn_list_scroll")
             .auto_shrink([false; 2])
@@ -221,23 +252,24 @@ pub fn connections_sidebar(
 
                     // Connect on row click (not on dots)
                     if row_resp.clicked() && !dots_resp.clicked() && !row_resp.long_touched() {
-                        action.show_menu = false;
+                        ui.data_mut(|d| d.insert_temp(menu_id_key, None::<String>));
                         action.connect_connection = Some(conn.id.clone());
                     }
 
-                    // Right-click / long-press → menu
+                    // Right-click → menu
                     let show_file = matches!(conn.conn_type, ConnectionType::Local | ConnectionType::Ssh);
                     row_resp.context_menu(|ui| {
+                        ui.data_mut(|d| d.insert_temp(menu_id_key, None::<String>));
                         paint_conn_menu(ui, conn, show_file, &mut action);
                     });
+                    // Long-press / ⋮ click → open menu
                     if row_resp.long_touched() || dots_resp.clicked() {
-                        action.show_menu = true;
-                        action.menu_conn_id = Some(conn.id.clone());
+                        ui.data_mut(|d| d.insert_temp(menu_id_key, Some(conn.id.clone())));
                     }
 
                     if ui.is_rect_visible(row_rect) {
                         let painter = ui.painter_at(row_rect);
-                        if row_resp.hovered() {
+                        if row_resp.hovered() || menu_state.as_deref() == Some(conn.id.as_str()) {
                             painter.rect_filled(
                                 row_rect,
                                 style::CORNER_RADIUS_XS,
@@ -245,23 +277,9 @@ pub fn connections_sidebar(
                             );
                         }
 
-                        // Icon
-                        let icon_g = ui.fonts_mut(|f| {
-                            f.layout(
-                                conn.conn_type.icon().to_string(),
-                                egui::FontId::proportional(16.0),
-                                style::ACCENT,
-                                f32::INFINITY,
-                            )
-                        });
-                        painter.galley(
-                            egui::pos2(row_rect.left() + 8.0, row_rect.center().y - icon_g.size().y / 2.0),
-                            icon_g,
-                            style::ACCENT,
-                        );
-
-                        // Name (with room for ⋮ on right)
-                        let name_w = row_rect.width() - 80.0;
+                        // Name
+                        let text_left = row_rect.left() + 10.0;
+                        let name_w = row_rect.right() - text_left - 30.0;
                         let name_g = ui.fonts_mut(|f| {
                             f.layout(
                                 conn.name.clone(),
@@ -271,7 +289,7 @@ pub fn connections_sidebar(
                             )
                         });
                         painter.galley(
-                            egui::pos2(row_rect.left() + 34.0, row_rect.top() + 4.0),
+                            egui::pos2(text_left, row_rect.top() + 4.0),
                             name_g,
                             ui.visuals().text_color(),
                         );
@@ -286,78 +304,57 @@ pub fn connections_sidebar(
                             )
                         });
                         painter.galley(
-                            egui::pos2(row_rect.left() + 34.0, row_rect.top() + 22.0),
+                            egui::pos2(text_left, row_rect.top() + 22.0),
                             det_g,
                             ui.visuals().weak_text_color(),
                         );
 
                         // ⋮ character
-                        let dots_char = "\u{22EE}";
                         let dots_g = ui.fonts_mut(|f| {
                             f.layout(
-                                dots_char.to_string(),
+                                "\u{22EE}".to_string(),
                                 egui::FontId::proportional(16.0),
-                                ui.visuals().weak_text_color(),
+                                if dots_resp.hovered() { ui.visuals().text_color() } else { ui.visuals().weak_text_color() },
                                 f32::INFINITY,
                             )
                         });
                         painter.galley(
-                            egui::pos2(
-                                dots_rect.center().x - dots_g.size().x / 2.0,
-                                dots_rect.center().y - dots_g.size().y / 2.0,
-                            ),
+                            egui::pos2(dots_rect.center().x - dots_g.size().x / 2.0, dots_rect.center().y - dots_g.size().y / 2.0),
                             dots_g,
-                            if dots_resp.hovered() {
-                                ui.visuals().text_color()
-                            } else {
-                                ui.visuals().weak_text_color()
-                            },
+                            if dots_resp.hovered() { ui.visuals().text_color() } else { ui.visuals().weak_text_color() },
                         );
+                    }
+
+                    // Popup anchored to the ⋮ button (only for the active row)
+                    if menu_state.as_deref() == Some(conn.id.as_str()) {
+                        egui::Popup::from_response(&dots_resp)
+                            .id(dots_id.with("ctx"))
+                            .show(|ui| {
+                                ui.set_min_width(130.0);
+                                if ui.button(rust_i18n::t!("connect")).clicked() {
+                                    action.connect_connection = Some(conn.id.clone());
+                                    ui.data_mut(|d| d.insert_temp(menu_id_key, None::<String>));
+                                }
+                                if show_file {
+                                    if ui.button(rust_i18n::t!("home_file_manager")).clicked() {
+                                        action.open_file_mgr = Some(conn.id.clone());
+                                        ui.data_mut(|d| d.insert_temp(menu_id_key, None::<String>));
+                                    }
+                                }
+                                if ui.button(rust_i18n::t!("edit")).clicked() {
+                                    action.edit_connection = Some(conn.id.clone());
+                                    ui.data_mut(|d| d.insert_temp(menu_id_key, None::<String>));
+                                }
+                                if ui.button(rust_i18n::t!("delete")).clicked() {
+                                    action.delete_connection = Some(conn.id.clone());
+                                    ui.data_mut(|d| d.insert_temp(menu_id_key, None::<String>));
+                                }
+                            });
                     }
 
                     ui.add_space(2.0);
                 }
             });
-
-        // ── Context menu popup (triggered by ⋮ click) ────────────────────────
-        if action.show_menu {
-            if let Some(ref menu_id) = action.menu_conn_id.clone() {
-                if let Some(conn) = sorted.iter().find(|c| c.id == *menu_id) {
-                    let show_file = matches!(conn.conn_type, ConnectionType::Local | ConnectionType::Ssh);
-                    let menu_id_egui = egui::Id::new("conn_context_menu");
-                    let close = |action: &mut ConnectionsSidebarAction| {
-                        action.show_menu = false;
-                        action.menu_conn_id = None;
-                    };
-                    egui::Area::new(menu_id_egui)
-                        .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-8.0, 40.0))
-                        .order(egui::Order::Foreground)
-                        .show(ui.ctx(), |ui| {
-                            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                                ui.set_min_width(130.0);
-                                if ui.button(rust_i18n::t!("connect")).clicked() {
-                                    action.connect_connection = Some(conn.id.clone());
-                                    close(&mut action);
-                                }
-                                if show_file {
-                                    if ui.button(rust_i18n::t!("home_file_manager")).clicked() {
-                                        action.open_file_mgr = Some(conn.id.clone());
-                                        close(&mut action);
-                                    }
-                                }
-                                if ui.button(rust_i18n::t!("edit")).clicked() {
-                                    action.edit_connection = Some(conn.id.clone());
-                                    close(&mut action);
-                                }
-                                if ui.button(rust_i18n::t!("delete")).clicked() {
-                                    action.delete_connection = Some(conn.id.clone());
-                                    close(&mut action);
-                                }
-                            });
-                        });
-                }
-            }
-        }
     }
 
     action
@@ -372,9 +369,6 @@ fn paint_conn_menu(
 ) {
     ui.set_min_width(130.0);
     // Clear any ⋮ menu state
-    action.show_menu = false;
-    action.menu_conn_id = None;
-
     if ui.button(rust_i18n::t!("connect")).clicked() {
         action.connect_connection = Some(conn.id.clone());
         ui.close();

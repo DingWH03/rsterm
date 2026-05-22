@@ -1,7 +1,8 @@
-//! Responsive sidebar: home is pinned when wide; workspace toggles when wide; overlay when narrow.
+//! Responsive sidebar: docked (toggleable via ☰) when wide; overlay when narrow.
 
 pub mod common;
-pub mod terminal_sidebar;
+pub mod session_list;
+pub mod sidebars;
 
 use crate::ui::widget::style;
 
@@ -11,14 +12,13 @@ pub const OVERLAY_WIDTH: f32 = 260.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SidebarPage {
-    Home,
     Workspace,
 }
 
 pub struct Sidebar {
     pub wide: bool,
-    /// Terminal page + wide layout: docked panel open (toggle with ☰).
-    workspace_docked_open: bool,
+    /// Wide layout: docked sidebar visible.
+    docked_open: bool,
     /// Narrow layout: slide-over panel open.
     overlay_open: bool,
 }
@@ -27,7 +27,7 @@ impl Sidebar {
     pub fn new() -> Self {
         Self {
             wide: false,
-            workspace_docked_open: false,
+            docked_open: true,
             overlay_open: false,
         }
     }
@@ -40,42 +40,24 @@ impl Sidebar {
         self.wide = now_wide;
     }
 
-    /// Permanent left `SidePanel` (not overlay).
-    pub fn docked_visible(&self, page: SidebarPage) -> bool {
-        match page {
-            SidebarPage::Home => self.wide,
-            SidebarPage::Workspace => self.wide && self.workspace_docked_open,
-        }
+    /// Docked left panel (wide layout only).
+    pub fn docked_visible(&self) -> bool {
+        self.wide && self.docked_open
     }
 
     pub fn overlay_visible(&self) -> bool {
         !self.wide && self.overlay_open
     }
 
-    /// Show ☰ in the main content header (workspace: always, to toggle dock/overlay).
-    pub fn show_content_hamburger(&self, page: SidebarPage) -> bool {
-        match page {
-            SidebarPage::Home => !self.wide,
-            SidebarPage::Workspace => true,
-        }
+    /// Show ☰ hamburger in content area.
+    pub fn show_content_hamburger(&self) -> bool {
+        true
     }
 
-    /// Show ☰ inside a docked/overlay sidebar panel (home overlay, narrow workspace).
-    pub fn show_panel_hamburger(&self, page: SidebarPage) -> bool {
-        match page {
-            SidebarPage::Home => self.overlay_visible(),
-            SidebarPage::Workspace => !self.wide,
-        }
-    }
-
-    pub fn hamburger_click(&mut self, page: SidebarPage) {
+    /// Toggle sidebar visibility.
+    pub fn hamburger_click(&mut self) {
         if self.wide {
-            match page {
-                SidebarPage::Home => {}
-                SidebarPage::Workspace => {
-                    self.workspace_docked_open = !self.workspace_docked_open;
-                }
-            }
+            self.docked_open = !self.docked_open;
         } else {
             self.overlay_open = !self.overlay_open;
         }
@@ -115,7 +97,8 @@ impl Sidebar {
         F: FnMut(&mut egui::Ui),
     {
         let rect = ctx.content_rect();
-        let w = OVERLAY_WIDTH;
+        // Responsive overlay width: adapts to screen width on narrow devices.
+        let w = OVERLAY_WIDTH.min(rect.width() * 0.82).max(180.0);
         let top_inset = {
             #[cfg(target_os = "android")]
             {
@@ -133,6 +116,7 @@ impl Sidebar {
             .show(ctx, |ui| {
                 egui::Frame::side_top_panel(ui.style()).show(ui, |ui| {
                     ui.set_min_width(w);
+                    ui.set_max_width(w);
                     ui.set_min_height(panel_height);
                     ui.set_max_height(panel_height);
                     body(ui);

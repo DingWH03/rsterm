@@ -59,7 +59,7 @@ pub const CORNER_RADIUS: CornerRadius = CornerRadius::same(10);
 pub const CORNER_RADIUS_SM: CornerRadius = CornerRadius::same(6);
 pub const CORNER_RADIUS_XS: CornerRadius = CornerRadius::same(4);
 
-pub const CARD_HEIGHT: f32 = 80.0;
+pub const CARD_HEIGHT: f32 = 60.0;
 pub const CARD_SPACING: f32 = 8.0;
 
 // ─── Frame helpers ───────────────────────────────────────────────────────────

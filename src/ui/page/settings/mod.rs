@@ -86,14 +86,6 @@ pub fn settings_side_panel(ui: &mut egui::Ui, settings: &mut AppSettings) -> boo
         });
     });
     ui.add_space(2.0);
-    ui.label(
-        egui::RichText::new(rust_i18n::t!("settings_terminal_running_hint"))
-            .size(11.0)
-            .color(ui.visuals().weak_text_color()),
-    );
-    ui.add_space(8.0);
-    ui.separator();
-    ui.add_space(6.0);
     settings_scroll_body(ui, settings, SettingsLayout::Workspace);
     close
 }

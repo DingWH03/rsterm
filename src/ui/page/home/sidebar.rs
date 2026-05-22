@@ -1,6 +1,5 @@
 use crate::session::WorkspaceSession;
 use crate::ui::widget::sidebar::Sidebar;
-use crate::ui::widget::sidebar::SidebarPage;
 use crate::ui::widget::sidebar::common::{nav_button, sidebar_brand_row, sidebar_sessions_panel, SidebarSessionAction};
 
 pub struct HomeSidebarResult {
@@ -24,8 +23,8 @@ pub fn paint_home_sidebar(
     sessions: &[WorkspaceSession],
     active_session_id: Option<&str>,
 ) -> HomeSidebarResult {
-    let show_ham = in_overlay && sidebar.show_panel_hamburger(SidebarPage::Home);
-    sidebar_brand_row(ui, sidebar, SidebarPage::Home, show_ham);
+    let show_ham = in_overlay && !sidebar.wide;
+    sidebar_brand_row(ui, sidebar, show_ham);
     ui.add_space(8.0);
 
     let mut nav_action = HomeSidebarAction::None;

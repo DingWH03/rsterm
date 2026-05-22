@@ -15,7 +15,7 @@ use crate::session::{
     InfoDialog, PaneState, RemotePane, RenameDialog,
 };
 use crate::ui::page::file_manager::transfer::{apply_transfer_done, PasteTarget};
-use crate::ui::widget::sidebar::{Sidebar, SidebarPage};
+use crate::ui::widget::sidebar::Sidebar;
 use crate::ui::widget::style;
 
 #[derive(Default)]
@@ -81,10 +81,10 @@ pub fn file_manager_view(
     let transfer_ui = session.transfer.read_ui();
 
     ui.horizontal(|ui| {
-        if sidebar.show_content_hamburger(SidebarPage::Workspace)
+        if sidebar.show_content_hamburger()
             && sidebar.hamburger(ui).clicked()
         {
-            sidebar.hamburger_click(SidebarPage::Workspace);
+            sidebar.hamburger_click();
         }
         ui.label(
             egui::RichText::new(&session.title)

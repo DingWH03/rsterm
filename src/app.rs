@@ -13,19 +13,17 @@ use crate::ui::page::terminal::{
 };
 use crate::ui::page::file_manager::{file_manager_view, FileManagerAction};
 use crate::ui::widget::dialogs::{LocalTerminalSettingsDialog, NewConnectionDialog};
-use crate::ui::page::home::{home_screen, HomeCardMenuAction};
-use crate::ui::page::home::sidebar::{paint_home_sidebar, HomeSidebarAction};
 use crate::ui::widget::keyboard::VirtualKeyboard;
 use crate::ui::page::settings::{settings_page, settings_side_panel};
-use crate::ui::widget::sidebar::{Sidebar, SidebarPage, DOCK_WIDTH};
+use crate::ui::widget::sidebar::{Sidebar, DOCK_WIDTH};
 use crate::ui::widget::style;
-use crate::ui::widget::sidebar::terminal_sidebar::{terminal_sidebar, TerminalSidebarAction};
+use crate::ui::widget::sidebar::sidebars::{main_sidebar, connections_sidebar, MainSidebarAction, ConnectionsSidebarAction};
 use log::info;
 
 #[derive(Clone, Copy, PartialEq)]
-enum Page {
-    Home,
-    Workspace,
+enum SidebarMode {
+    Main,
+    Connections,
 }
 
 pub struct RsTerminalApp {
@@ -36,14 +34,12 @@ pub struct RsTerminalApp {
     virtual_keyboard: VirtualKeyboard,
     new_conn_dialog: NewConnectionDialog,
     local_term_dialog: LocalTerminalSettingsDialog,
-    page: Page,
     live_font_size: f32,
     sidebar: Sidebar,
-    /// Home central panel: settings instead of connection list.
-    home_settings: bool,
-    /// Workspace central panel: full-page settings (narrow layout).
+    sidebar_mode: SidebarMode,
+    /// Central panel: full-page settings (narrow layout).
     workspace_settings: bool,
-    /// Workspace right panel: settings (wide layout only).
+    /// Right panel: settings (wide layout only).
     settings_open: bool,
     /// Immediate connect failure (serial open, SSH config, etc.) before a session is opened.
     connection_notice: Option<String>,
@@ -69,10 +65,9 @@ impl Default for RsTerminalApp {
             virtual_keyboard: VirtualKeyboard::new(kbd_mode),
             new_conn_dialog: NewConnectionDialog::default(),
             local_term_dialog: LocalTerminalSettingsDialog::default(),
-            page: Page::Home,
             live_font_size,
             sidebar: Sidebar::new(),
-            home_settings: false,
+            sidebar_mode: SidebarMode::Main,
             workspace_settings: false,
             settings_open: false,
             connection_notice: None,
@@ -186,7 +181,6 @@ impl RsTerminalApp {
         let id = session.id().to_string();
         self.active_session_id = Some(id);
         self.sessions.push(session);
-        self.page = Page::Workspace;
     }
 
     fn open_file_manager_ssh(&mut self, conn_id: &str) {
@@ -204,27 +198,20 @@ impl RsTerminalApp {
         self.push_session(WorkspaceSession::FileManager(FileManagerSession::open_local()));
     }
 
-    fn effective_local_config(&self) -> SavedConnection {
-        if let Some(id) = &self.settings.default_local_connection_id {
-            if let Some(c) = self
-                .saved_connections
-                .iter()
-                .find(|c| c.id == *id && c.conn_type == ConnectionType::Local)
-            {
-                return c.clone();
-            }
-        }
-        self.saved_connections
+    #[cfg(not(target_os = "android"))]
+    fn connect_local(&mut self) {
+        let Some(config) = self
+            .saved_connections
             .iter()
             .find(|c| c.conn_type == ConnectionType::Local)
             .cloned()
-            .unwrap_or_else(|| SavedConnection::new_local("Local Terminal", None))
-    }
-
-    #[cfg(not(target_os = "android"))]
-    fn connect_local(&mut self) {
+        else {
+            self.connection_notice = Some(
+                "No saved Local Terminal connection. Add one via the + button.".into(),
+            );
+            return;
+        };
         let profile = self.settings.default_profile().clone();
-        let config = self.effective_local_config();
         match local::connect_local(&config, &profile, 24, 80) {
             Ok(handle) => self.open_session(handle, &config, profile.scrollback_lines),
             Err(e) => self.connection_notice = Some(e),
@@ -386,7 +373,6 @@ impl RsTerminalApp {
         }
         if self.sessions.is_empty() {
             self.active_session_id = None;
-            self.page = Page::Home;
             self.save_profile_tweaks();
         }
     }
@@ -464,7 +450,6 @@ impl RsTerminalApp {
     ) {
         if let Some(id) = action.select_session {
             self.active_session_id = Some(id);
-            self.page = Page::Workspace;
             self.workspace_settings = false;
             if in_overlay {
                 self.sidebar.close_overlay();
@@ -479,29 +464,6 @@ impl RsTerminalApp {
                 self.sidebar.close_overlay();
             }
         }
-    }
-
-    fn handle_home_sidebar_result(
-        &mut self,
-        result: crate::ui::page::home::sidebar::HomeSidebarResult,
-        in_overlay: bool,
-    ) {
-        match result.nav {
-            HomeSidebarAction::Home => {
-                self.home_settings = false;
-                if in_overlay {
-                    self.sidebar.close_overlay();
-                }
-            }
-            HomeSidebarAction::Settings => {
-                self.home_settings = true;
-                if in_overlay {
-                    self.sidebar.close_overlay();
-                }
-            }
-            HomeSidebarAction::None => {}
-        }
-        self.apply_session_panel_action(result.sessions, in_overlay);
     }
 
     fn handle_back_navigation(&mut self, ctx: &egui::Context) -> bool {
@@ -524,13 +486,6 @@ impl RsTerminalApp {
             self.sidebar.close_overlay();
             return true;
         }
-        if self.home_settings {
-            self.home_settings = false;
-            save_settings(&self.settings);
-            self.live_font_size = self.settings.font_size();
-            self.reload_terminal_fonts(ctx);
-            return true;
-        }
         if self.workspace_settings {
             self.workspace_settings = false;
             save_settings(&self.settings);
@@ -543,14 +498,6 @@ impl RsTerminalApp {
             save_settings(&self.settings);
             self.live_font_size = self.settings.font_size();
             self.reload_terminal_fonts(ctx);
-            return true;
-        }
-        if self.page == Page::Workspace {
-            self.save_profile_tweaks();
-            self.page = Page::Home;
-            self.workspace_settings = false;
-            self.settings_open = false;
-            self.sidebar.close_overlay();
             return true;
         }
         if self.has_open_sessions() {
@@ -592,6 +539,12 @@ impl eframe::App for RsTerminalApp {
         // Apply UI theme on every frame (cheap — only changes if setting changed).
         self.settings.ui_theme.apply(&ctx);
         self.sidebar.sync_width(ctx.content_rect().width());
+
+        // On narrow with no sessions, auto-open sidebar overlay.
+        if !self.sidebar.wide && self.sessions.is_empty() && !self.sidebar.overlay_visible() {
+            self.sidebar.hamburger_click();
+        }
+
         show_connection_notice(&ctx, &mut self.connection_notice);
 
         // Android status‑bar inset (0 on desktop).
@@ -610,330 +563,231 @@ impl eframe::App for RsTerminalApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
 
-        match self.page {
-            Page::Home => {
-                let mut local_clicked = false;
-                let mut local_fm_clicked = false;
-                let mut fab_clicked = false;
-                let mut connect_clicked = None;
-                let mut edit_clicked = None;
-                let mut sftp_clicked = None;
-                let mut delete_clicked = None;
-                let mut _settings_clicked = false;
-                let mut selected_conn_id: Option<String> = None;
-                let mut card_menu = HomeCardMenuAction::default();
+        self.drain_inactive_sessions();
 
-                let mut home_sidebar_result =
-                    None::<crate::ui::page::home::sidebar::HomeSidebarResult>;
-                if self.sidebar.docked_visible(SidebarPage::Home) {
-                    egui::Panel::left("home_sidebar")
-                        .min_size(DOCK_WIDTH)
-                        .max_size(280.0)
-                        .resizable(false)
-                        .show_inside(ui, |panel_ui| {
-                            panel_ui.add_space(top_inset);
-                            home_sidebar_result = Some(paint_home_sidebar(
-                                panel_ui,
-                                &mut self.sidebar,
-                                false,
-                                !self.home_settings,
-                                self.home_settings,
-                                &self.sessions,
-                                self.active_session_id.as_deref(),
-                            ));
-                        });
-                }
-                if let Some(r) = home_sidebar_result {
-                    self.handle_home_sidebar_result(r, false);
-                }
+        let on_settings = self.workspace_settings
+            || (self.sidebar.wide && self.settings_open);
 
-                if self.sidebar.overlay_visible() {
-                    if Sidebar::overlay_backdrop_clicked(&ctx, egui::Id::new("home_overlay_backdrop")) {
-                        self.sidebar.close_overlay();
-                    }
-                    Sidebar::show_overlay(&ctx, "home_sidebar_overlay", |ui| {
-                        let r = paint_home_sidebar(
-                            ui,
-                            &mut self.sidebar,
-                            true,
-                            !self.home_settings,
-                            self.home_settings,
-                            &self.sessions,
-                            self.active_session_id.as_deref(),
-                        );
-                        self.handle_home_sidebar_result(r, true);
+        let mut sidebar_action = MainSidebarAction {
+            select_session: None,
+            close_session: None,
+            new_window_session: None,
+            open_connection_mgmt: false,
+            settings_toggled: false,
+        };
+        let mut conn_action = ConnectionsSidebarAction {
+            go_back: false,
+            new_connection: false,
+            connect_connection: None,
+            open_file_mgr: None,
+            edit_connection: None,
+            delete_connection: None,
+        };
+
+        // ── Sidebar + content layout (responsive) ────────────────────────────
+        let show_sidebar = if self.sidebar.wide {
+            self.sidebar.docked_visible()
+        } else {
+            self.sidebar.overlay_visible()
+        };
+
+        // Sidebar panel (hide when settings open on narrow)
+        let is_wide = self.sidebar.wide;
+        if show_sidebar && !(self.workspace_settings && !is_wide) {
+            if is_wide {
+                egui::Panel::left("main_sidebar")
+                    .min_size(DOCK_WIDTH)
+                    .max_size(280.0)
+                    .resizable(true)
+                    .show_inside(ui, |ui| {
+                        ui.add_space(top_inset);
+                        match self.sidebar_mode {
+                            SidebarMode::Main => {
+                                sidebar_action = main_sidebar(ui, &mut self.sidebar, &self.sessions, self.active_session_id.as_deref(), on_settings);
+                            }
+                            SidebarMode::Connections => {
+                                conn_action = connections_sidebar(ui, &self.saved_connections);
+                            }
+                        }
                     });
-                }
-
-                egui::CentralPanel::default().show_inside(ui, |ui| {
-                    ui.add_space(top_inset);
-                    if self.sidebar.show_content_hamburger(SidebarPage::Home) {
-                        ui.horizontal(|ui| {
-                            if self.sidebar.hamburger(ui).clicked() {
-                                self.sidebar.hamburger_click(SidebarPage::Home);
+            } else {
+                egui::Panel::left("main_sidebar_narrow")
+                    .min_size(ui.available_width())
+                    .resizable(false)
+                    .show_inside(ui, |ui| {
+                        ui.add_space(top_inset);
+                        match self.sidebar_mode {
+                            SidebarMode::Main => {
+                                sidebar_action = main_sidebar(ui, &mut self.sidebar, &self.sessions, self.active_session_id.as_deref(), on_settings);
                             }
-                            ui.label(egui::RichText::new("rsTerminal").weak().size(13.0));
-                        });
-                        ui.separator();
-                    }
-
-                    if self.home_settings {
-                        if settings_page(ui, &mut self.settings) {
-                            self.home_settings = false;
-                            save_settings(&self.settings);
-                            self.live_font_size = self.settings.font_size();
-                            self.reload_terminal_fonts(ui.ctx());
+                            SidebarMode::Connections => {
+                                conn_action = connections_sidebar(ui, &self.saved_connections);
+                            }
                         }
-                    } else {
-                        home_screen(
-                            ui,
-                            &self.saved_connections,
-                            &mut selected_conn_id,
-                            &mut card_menu,
-                            &mut local_clicked,
-                            &mut local_fm_clicked,
-                            &mut fab_clicked,
-                            &mut connect_clicked,
-                            &mut edit_clicked,
-                            &mut sftp_clicked,
-                            &mut delete_clicked,
-                            &mut _settings_clicked,
-                        );
-                    }
-                });
-
-                if card_menu.local_fm {
-                    local_fm_clicked = true;
-                }
-                if let Some(id) = card_menu.sftp_id.clone() {
-                    sftp_clicked = Some(id);
-                }
-                if let Some(apply) =
-                    self.local_term_dialog.show(&ctx, &self.saved_connections)
-                {
-                    self.apply_local_terminal_settings(apply);
-                }
-
-                #[cfg(not(target_os = "android"))]
-                if local_clicked {
-                    self.connect_local();
-                }
-                if local_fm_clicked {
-                    self.open_file_manager_local();
-                }
-                if fab_clicked {
-                    self.new_conn_dialog.open_new();
-                }
-                if let Some(ref id) = connect_clicked {
-                    self.connect_to(id);
-                }
-                if let Some(ref id) = edit_clicked {
-                    if let Some(conn) = self.saved_connections.iter().find(|c| &c.id == id) {
-                        self.new_conn_dialog.open_edit(conn);
-                    }
-                }
-                if let Some(ref id) = sftp_clicked {
-                    self.open_file_manager_ssh(id);
-                }
-                if let Some(ref id) = delete_clicked {
-                    self.saved_connections.retain(|c| c.id != *id);
-                    storage::save_connections(&self.saved_connections);
-                }
-                if let Some(new_conn) = self.new_conn_dialog.show(&ctx) {
-                    if let Some(pos) = self
-                        .saved_connections
-                        .iter()
-                        .position(|c| c.id == new_conn.id)
-                    {
-                        self.saved_connections[pos] = new_conn;
-                    } else {
-                        self.saved_connections.push(new_conn);
-                    }
-                    storage::save_connections(&self.saved_connections);
-                }
-                ctx.request_repaint_after(std::time::Duration::from_secs(1));
-            }
-
-            Page::Workspace => {
-                self.drain_inactive_sessions();
-
-                let on_workspace_settings = self.workspace_settings
-                    || (self.sidebar.wide && self.settings_open);
-
-                let mut sidebar_action = TerminalSidebarAction {
-                    select_session: None,
-                    close_session: None,
-                    new_window_session: None,
-                    go_home: false,
-                    settings_toggled: false,
-                };
-
-                if self.sidebar.docked_visible(SidebarPage::Workspace) {
-                    egui::Panel::left("workspace_sidebar")
-                        .min_size(DOCK_WIDTH)
-                        .max_size(300.0)
-                        .resizable(true)
-                        .show_inside(ui, |ui| {
-                            ui.add_space(top_inset);
-                            sidebar_action = terminal_sidebar(
-                                ui,
-                                &mut self.sidebar,
-                                on_workspace_settings,
-                                &self.sessions,
-                                self.active_session_id.as_deref(),
-                            );
-                        });
-                }
-
-                if self.sidebar.overlay_visible() {
-                    if Sidebar::overlay_backdrop_clicked(&ctx, egui::Id::new("workspace_overlay_backdrop"))
-                    {
-                        self.sidebar.close_overlay();
-                    }
-                    Sidebar::show_overlay(&ctx, "workspace_sidebar_overlay", |ui| {
-                        sidebar_action = terminal_sidebar(
-                            ui,
-                            &mut self.sidebar,
-                            on_workspace_settings,
-                            &self.sessions,
-                            self.active_session_id.as_deref(),
-                        );
                     });
-                }
-
-                if sidebar_action.settings_toggled {
-                    if self.sidebar.wide {
-                        self.settings_open = !self.settings_open;
-                        self.workspace_settings = false;
-                    } else {
-                        self.workspace_settings = true;
-                        self.settings_open = false;
-                        self.sidebar.close_overlay();
-                    }
-                }
-
-                if self.sidebar.wide && self.settings_open && !self.workspace_settings {
-                    let mut close_settings = false;
-                    egui::Panel::right("workspace_settings_panel")
-                        .min_size(300.0)
-                        .max_size(420.0)
-                        .resizable(true)
-                        .show_inside(ui, |ui| {
-                            close_settings = settings_side_panel(ui, &mut self.settings);
-                        });
-                    if close_settings {
-                        self.settings_open = false;
-                    }
-                }
-
-                let mut view_action = ConnectionViewAction::None;
-                let mut fm_action = FileManagerAction::default();
-                if let Some(idx) = self.active_session_index() {
-                    if let WorkspaceSession::Terminal(term) = &mut self.sessions[idx] {
-                        term.handle.repaint.set_context(ctx.clone());
-                    }
-                }
-
-                egui::CentralPanel::default().show_inside(ui, |ui| {
-                    ui.add_space(top_inset);
-                    if self.workspace_settings {
-                        if settings_page(ui, &mut self.settings) {
-                            self.workspace_settings = false;
-                            save_settings(&self.settings);
-                            self.live_font_size = self.settings.font_size();
-                            self.reload_terminal_fonts(ui.ctx());
-                        }
-                    } else if let Some(idx) = self.active_session_index() {
-                        match &mut self.sessions[idx] {
-                            WorkspaceSession::Terminal(term) => {
-                                let theme = self.settings.theme();
-                                let cursor_style = self.settings.cursor_style();
-                                let cell_width_scale = self.settings.default_profile().cell_width_scale;
-                                view_action = connection_view(
-                                    ui,
-                                    Some(term),
-                                    &mut self.virtual_keyboard,
-                                    theme,
-                                    cursor_style,
-                                    &mut self.live_font_size,
-                                    cell_width_scale,
-                                    &mut self.sidebar,
-                                );
-                            }
-                            WorkspaceSession::FileManager(fm) => {
-                                fm_action = file_manager_view(ui, fm, &mut self.sidebar);
-                            }
-                        }
-                    } else {
-                        ui.vertical_centered(|ui| {
-                            ui.add_space(60.0);
-                            ui.label(
-                                egui::RichText::new("\u{1F4BB}")
-                                    .size(40.0),
-                            );
-                            ui.add_space(12.0);
-                            ui.label(
-                                egui::RichText::new("No active terminal")
-                                    .size(16.0)
-                                    .color(ui.visuals().weak_text_color()),
-                            );
-                            ui.add_space(4.0);
-                            ui.label(
-                                egui::RichText::new("Open a terminal session to get started")
-                                    .size(12.0)
-                                    .color(ui.visuals().weak_text_color()),
-                            );
-                            ui.add_space(16.0);
-                            #[cfg(not(target_os = "android"))]
-                            {
-                                let btn = egui::Button::new(
-                                    egui::RichText::new("Open Local Terminal")
-                                        .size(14.0)
-                                        .color(egui::Color32::WHITE),
-                                )
-                                .fill(style::ACCENT)
-                                .corner_radius(style::CORNER_RADIUS_SM)
-                                .min_size(egui::vec2(180.0, 38.0));
-                                if ui.add(btn).clicked() {
-                                    self.connect_local();
-                                }
-                            }
-                        });
-                    }
-                });
-
-                if sidebar_action.go_home {
-                    self.save_profile_tweaks();
-                    self.page = Page::Home;
-                    self.workspace_settings = false;
-                    self.settings_open = false;
-                    self.sidebar.close_overlay();
-                }
-                if self.workspace_settings
-                    || self.settings_open
-                    || sidebar_action.settings_toggled
-                {
-                    save_settings(&self.settings);
-                    self.live_font_size = self.settings.font_size();
-                }
-
-                self.apply_session_panel_action(
-                    crate::ui::widget::sidebar::common::SidebarSessionAction {
-                        select_session: sidebar_action.select_session,
-                        close_session: sidebar_action.close_session,
-                        new_window_session: sidebar_action.new_window_session,
-                    },
-                    self.sidebar.overlay_visible(),
-                );
-                if matches!(view_action, ConnectionViewAction::CloseSession)
-                    || fm_action.close
-                {
-                    if let Some(id) = self.active_session_id.clone() {
-                        self.close_session(&id);
-                    }
-                }
-                ctx.request_repaint_after(std::time::Duration::from_millis(400));
             }
         }
+
+        // Right settings panel (wide only)
+        if self.sidebar.wide && self.settings_open && !self.workspace_settings {
+            let mut close_settings = false;
+            egui::Panel::right("settings_panel")
+                .min_size(300.0)
+                .max_size(420.0)
+                .resizable(true)
+                .show_inside(ui, |ui| {
+                    close_settings = settings_side_panel(ui, &mut self.settings);
+                });
+            if close_settings {
+                self.settings_open = false;
+            }
+        }
+
+        // Settings toggle (after sidebar rendering so the action is captured)
+        if sidebar_action.settings_toggled {
+            if self.sidebar.wide {
+                self.settings_open = !self.settings_open;
+                self.workspace_settings = false;
+                self.sidebar_mode = SidebarMode::Main;
+            } else {
+                self.workspace_settings = true;
+                self.settings_open = false;
+                self.sidebar.close_overlay();
+                self.sidebar_mode = SidebarMode::Main;
+            }
+        }
+
+        // Central content (wide: always; narrow: only when sidebar hidden or settings open)
+        let mut view_action = ConnectionViewAction::None;
+        let mut fm_action = FileManagerAction::default();
+        if self.sidebar.wide || !show_sidebar || self.workspace_settings {
+            if let Some(idx) = self.active_session_index() {
+                if let WorkspaceSession::Terminal(term) = &mut self.sessions[idx] {
+                    term.handle.repaint.set_context(ctx.clone());
+                }
+            }
+
+            egui::CentralPanel::default().show_inside(ui, |ui| {
+                ui.add_space(top_inset);
+                if self.workspace_settings {
+                    if settings_page(ui, &mut self.settings) {
+                        self.workspace_settings = false;
+                        save_settings(&self.settings);
+                        self.live_font_size = self.settings.font_size();
+                        self.reload_terminal_fonts(ui.ctx());
+                    }
+                } else if let Some(idx) = self.active_session_index() {
+                    match &mut self.sessions[idx] {
+                        WorkspaceSession::Terminal(term) => {
+                            let theme = self.settings.theme();
+                            let cursor_style = self.settings.cursor_style();
+                            let cell_width_scale = self.settings.default_profile().cell_width_scale;
+                            view_action = connection_view(
+                                ui,
+                                Some(term),
+                                &mut self.virtual_keyboard,
+                                theme,
+                                cursor_style,
+                                &mut self.live_font_size,
+                                cell_width_scale,
+                                &mut self.sidebar,
+                            );
+                        }
+                        WorkspaceSession::FileManager(fm) => {
+                            fm_action = file_manager_view(ui, fm, &mut self.sidebar);
+                        }
+                    }
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(60.0);
+                        ui.label(
+                            egui::RichText::new("\u{1F4BB}").size(40.0),
+                        );
+                        ui.add_space(12.0);
+                        ui.label(
+                            egui::RichText::new("No active terminal")
+                                .size(16.0)
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                        ui.add_space(4.0);
+                        ui.label(
+                            egui::RichText::new("Open a terminal session to get started")
+                                .size(12.0)
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                    });
+                }
+            });
+        }
+
+        // ── Post-frame actions ────────────────────────────────────────────────
+        if sidebar_action.open_connection_mgmt {
+            self.sidebar_mode = SidebarMode::Connections;
+        }
+        if conn_action.go_back {
+            self.sidebar_mode = SidebarMode::Main;
+        }
+        if conn_action.new_connection {
+            self.new_conn_dialog.open_new();
+        }
+        if let Some(ref id) = conn_action.connect_connection {
+            self.connect_to(id);
+            self.sidebar_mode = SidebarMode::Main;
+            self.sidebar.close_overlay();
+        }
+        if let Some(ref id) = conn_action.open_file_mgr {
+            if let Some(conn) = self.saved_connections.iter().find(|c| c.id == *id) {
+                match conn.conn_type {
+                    ConnectionType::Local => self.open_file_manager_local(),
+                    ConnectionType::Ssh => self.open_file_manager_ssh(id),
+                    _ => {}
+                }
+            }
+            self.sidebar_mode = SidebarMode::Main;
+            self.sidebar.close_overlay();
+        }
+        if let Some(ref id) = conn_action.edit_connection {
+            if let Some(conn) = self.saved_connections.iter().find(|c| c.id == *id) {
+                self.new_conn_dialog.open_edit(conn);
+            }
+        }
+        if let Some(ref id) = conn_action.delete_connection {
+            self.saved_connections.retain(|c| c.id != *id);
+            storage::save_connections(&self.saved_connections);
+        }
+        if let Some(apply) = self.local_term_dialog.show(&ctx, &self.saved_connections) {
+            self.apply_local_terminal_settings(apply);
+        }
+        if self.workspace_settings || self.settings_open || sidebar_action.settings_toggled {
+            save_settings(&self.settings);
+            self.live_font_size = self.settings.font_size();
+        }
+        if let Some(new_conn) = self.new_conn_dialog.show(&ctx) {
+            if let Some(pos) = self
+                .saved_connections
+                .iter()
+                .position(|c| c.id == new_conn.id)
+            {
+                self.saved_connections[pos] = new_conn;
+            } else {
+                self.saved_connections.push(new_conn);
+            }
+            storage::save_connections(&self.saved_connections);
+        }
+
+        self.apply_session_panel_action(
+            crate::ui::widget::sidebar::common::SidebarSessionAction {
+                select_session: sidebar_action.select_session,
+                close_session: sidebar_action.close_session,
+                new_window_session: sidebar_action.new_window_session,
+            },
+            self.sidebar.overlay_visible(),
+        );
+        if matches!(view_action, ConnectionViewAction::CloseSession) || fm_action.close {
+            if let Some(id) = self.active_session_id.clone() {
+                self.close_session(&id);
+            }
+        }
+        ctx.request_repaint_after(std::time::Duration::from_millis(400));
     }
 }

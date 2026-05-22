@@ -19,7 +19,7 @@ use crate::terminal::{Terminal, DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS};
 use crate::ui::page::terminal::grid::{apply_resize, drain_after_resize};
 use crate::ui::widget::clipboard::{read_text, write_text};
 use crate::ui::widget::keyboard::VirtualKeyboard;
-use crate::ui::widget::sidebar::{Sidebar, SidebarPage};
+use crate::ui::widget::sidebar::Sidebar;
 use crate::ui::widget::style;
 use crate::ui::page::terminal::input::{
     allocate_terminal_surface, lock_terminal_focus, process_keyboard_input,
@@ -359,10 +359,10 @@ pub fn connection_view(
         .as_ref()
         .is_some_and(|s| s.touch_state.show_handles);
     ui.horizontal(|ui| {
-        if sidebar.show_content_hamburger(SidebarPage::Workspace)
+        if sidebar.show_content_hamburger()
             && sidebar.hamburger(ui).clicked()
         {
-            sidebar.hamburger_click(SidebarPage::Workspace);
+            sidebar.hamburger_click();
         }
 
         if show_actions {

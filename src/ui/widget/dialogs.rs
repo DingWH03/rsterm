@@ -59,6 +59,11 @@ impl NewConnectionDialog {
     pub fn open_new(&mut self) {
         *self = Self::default();
         self.open = true;
+        // Pre-fill Local defaults: system shell and home directory.
+        self.shell = crate::platform::get().default_shell();
+        self.working_dir = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_default();
     }
 
     pub fn open_edit(&mut self, conn: &SavedConnection) {
