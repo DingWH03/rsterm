@@ -18,6 +18,9 @@ use crate::terminal::metrics::measure_cell;
 use crate::terminal::{Terminal, DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS};
 use crate::ui::page::terminal::grid::{apply_resize, drain_after_resize};
 use crate::ui::widget::clipboard::{read_text, write_text};
+
+#[cfg(target_os = "android")]
+use crate::ui::page::terminal::input::sync_android_soft_input;
 use crate::ui::widget::keyboard::VirtualKeyboard;
 use crate::ui::widget::sidebar::Sidebar;
 use crate::ui::widget::style;

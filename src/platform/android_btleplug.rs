@@ -25,7 +25,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use jni_0_19::objects::{GlobalRef, JClass, JValue};
+use jni_0_19::objects::{GlobalRef, JValue};
 use jni_0_19::sys::{jint, JNI_VERSION_1_6};
 use jni_0_19::{JNIEnv, JavaVM};
 
@@ -302,7 +302,7 @@ fn call_btleplug_init_via_native(env: &JNIEnv<'_>, app_loader: &GlobalRef) -> Re
 /// Adapter class's class-loader context.  All FindClass calls inside
 /// btleplug::platform::init thus resolve app classes.
 unsafe extern "system" fn btleplug_init_native(
-    mut env: jni_0_19::JNIEnv<'_>,
+    env: jni_0_19::JNIEnv<'_>,
     _class: jni_0_19::objects::JClass<'_>,
 ) -> jni_0_19::sys::jboolean {
     log::info!("btleplug: initBtleplug native called (class-loader context)");

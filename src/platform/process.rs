@@ -1,5 +1,6 @@
 //! Process / host labels for terminal tab titles (local PTY foreground on Linux).
 
+#[cfg(target_os = "linux")]
 use std::fs;
 
 /// `user@hostname` for the local machine.

@@ -13,6 +13,7 @@ pub fn enumerate_serial_ports() -> Vec<SerialDevice> {
         return enumerate_android_dev_tty();
     }
 
+    #[cfg(not(target_os = "android"))]
     enumerate_via_serialport()
 }
 

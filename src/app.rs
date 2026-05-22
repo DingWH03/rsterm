@@ -532,7 +532,7 @@ impl eframe::App for RsTerminalApp {
 
         #[cfg(target_os = "android")]
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-            if !self.handle_back_navigation(ctx) {
+            if !self.handle_back_navigation(&ctx) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
@@ -550,7 +550,7 @@ impl eframe::App for RsTerminalApp {
         // Android status‑bar inset (0 on desktop).
         let top_inset: f32 = {
             #[cfg(target_os = "android")] {
-                crate::platform::get().top_inset_points(ctx)
+                crate::platform::get().top_inset_points(&ctx)
             }
             #[cfg(not(target_os = "android"))]
             { 0.0 }

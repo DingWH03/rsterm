@@ -133,7 +133,7 @@ fn ensure_all_files_access(env: &mut Env<'_>, activity: &JObject) -> Result<(), 
         .call_method(activity, jni_str!("getPackageName"), jni_sig!("()Ljava/lang/String;"), &[])?
         .try_into()?;
     let package_jstr = env.as_cast::<JString>(&package_obj)?;
-    let package = env.get_string(&package_jstr)?;
+    let package = package_jstr.to_string();
     let uri_str = env.new_string(format!("package:{package}"))?;
 
     let uri_class = env.find_class(jni_str!("android/net/Uri"))?;
