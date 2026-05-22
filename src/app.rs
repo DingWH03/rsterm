@@ -640,6 +640,7 @@ impl eframe::App for RsTerminalApp {
                 });
             if close_settings {
                 self.settings_open = false;
+                self.reload_terminal_fonts(&ctx);
             }
         }
 
@@ -761,6 +762,7 @@ impl eframe::App for RsTerminalApp {
         if self.workspace_settings || self.settings_open || sidebar_action.settings_toggled {
             save_settings(&self.settings);
             self.live_font_size = self.settings.font_size();
+            self.reload_terminal_fonts(&ctx);
         }
         if let Some(new_conn) = self.new_conn_dialog.show(&ctx) {
             if let Some(pos) = self
