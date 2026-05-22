@@ -358,7 +358,16 @@ pub fn connection_view(
     let show_actions = session
         .as_ref()
         .is_some_and(|s| s.touch_state.show_handles);
+
+    // Hide title when the panel is too narrow to fit it comfortably
+    let header_total_w = ui.available_width();
+    let show_title = header_total_w > 320.0 && !show_actions;
+
     ui.horizontal(|ui| {
+        // Compact header: tight spacing throughout
+        ui.style_mut().spacing.button_padding = egui::vec2(4.0, 1.0);
+        ui.style_mut().spacing.item_spacing.x = 4.0;
+
         if sidebar.show_content_hamburger()
             && sidebar.hamburger(ui).clicked()
         {
@@ -369,16 +378,16 @@ pub fn connection_view(
             // Selection mode: show Copy / Paste / Cancel instead of the title.
             if let Some(session) = session.as_mut() {
                 ui.scope(|ui| {
-                    ui.style_mut().spacing.button_padding = egui::vec2(6.0, 2.0);
+                    ui.style_mut().spacing.button_padding = egui::vec2(5.0, 1.0);
                     if ui
-                        .button(egui::RichText::new(rust_i18n::t!("copy")).size(13.0).strong())
+                        .button(egui::RichText::new(rust_i18n::t!("copy")).size(11.0).strong())
                         .clicked()
                     {
                         copy_selection_to_clipboard(session, &ctx);
                         ctx.request_repaint();
                     }
                     if ui
-                        .button(egui::RichText::new(rust_i18n::t!("paste")).size(13.0))
+                        .button(egui::RichText::new(rust_i18n::t!("paste")).size(11.0))
                         .clicked()
                     {
                         if let Some(text) = read_text() {
@@ -386,7 +395,7 @@ pub fn connection_view(
                         }
                     }
                     if ui
-                        .button(egui::RichText::new(rust_i18n::t!("cancel")).size(13.0))
+                        .button(egui::RichText::new(rust_i18n::t!("cancel")).size(11.0))
                         .clicked()
                     {
                         session.touch_state.show_handles = false;
@@ -397,11 +406,11 @@ pub fn connection_view(
                     }
                 });
             }
-        } else {
+        } else if show_title {
             let title = session.as_ref().map(|s| s.tab_label()).unwrap_or_default();
             ui.label(
                 egui::RichText::new(title)
-                    .size(14.0)
+                    .size(12.0)
                     .strong()
                     .color(ui.visuals().text_color()),
             );
@@ -429,7 +438,7 @@ pub fn connection_view(
                         label
                     };
                     if ui
-                        .selectable_label(selected, egui::RichText::new(text).size(12.0))
+                        .selectable_label(selected, egui::RichText::new(text).size(11.0))
                         .clicked()
                     {
                         session.switch_to_port(port);
@@ -440,29 +449,18 @@ pub fn connection_view(
         }
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Font size quick controls. Android uses two-finger pinch instead.
-            #[cfg(not(target_os = "android"))]
-            {
-                if toolbar_button(ui, "A-").clicked() {
-                    *font_size = (*font_size - 1.0).max(8.0);
-                }
-                if toolbar_button(ui, "A+").clicked() {
-                    *font_size = (*font_size + 1.0).min(32.0);
-                }
-                ui.separator();
-            }
+            ui.style_mut().spacing.button_padding = egui::vec2(4.0, 1.0);
 
-            // Keyboard toggle and mode
-            let kb_icon = if keyboard.visible { "⌨✓" } else { "⌨" };
-            if toolbar_button(ui, kb_icon).clicked() {
-                keyboard.toggle();
-                #[cfg(target_os = "android")]
-                if keyboard.visible && !keyboard.ime_active {
-                    sync_android_soft_input(ui.ctx(), false, egui::Rect::NOTHING);
+            // ── Close — rightmost, red accent hover ────────────────────────
+            ui.scope(|ui| {
+                ui.style_mut().visuals.widgets.hovered.bg_fill = style::RED_BG;
+                ui.style_mut().visuals.widgets.active.bg_fill = style::RED_BG;
+                if toolbar_button(ui, egui::RichText::new("✕").size(12.0).color(style::RED)).clicked() {
+                    action = ConnectionViewAction::CloseSession;
                 }
-            }
-            // IME button removed — the system IME is only activated by tapping
-            // the terminal area.  The virtual keyboard toggle (⌨) is below.
+            });
+
+            // ── Keyboard mode toggle ───────────────────────────────────────
             #[cfg(not(target_os = "android"))]
             let show_mode_toggle = true;
             #[cfg(target_os = "android")]
@@ -477,12 +475,30 @@ pub fn connection_view(
                 }
             }
 
-            if toolbar_button(ui, egui::RichText::new("✕").size(14.0).color(style::RED)).clicked() {
-                action = ConnectionViewAction::CloseSession;
+            // ── Keyboard toggle ────────────────────────────────────────────
+            let kb_icon = if keyboard.visible { "⌨✓" } else { "⌨" };
+            if toolbar_button(ui, kb_icon).clicked() {
+                keyboard.toggle();
+                #[cfg(target_os = "android")]
+                if keyboard.visible && !keyboard.ime_active {
+                    sync_android_soft_input(ui.ctx(), false, egui::Rect::NOTHING);
+                }
+            }
+
+            // ── Font size quick controls (desktop only) ────────────────────
+            #[cfg(not(target_os = "android"))]
+            {
+                if toolbar_button(ui, "A-").clicked() {
+                    *font_size = (*font_size - 1.0).max(8.0);
+                }
+                if toolbar_button(ui, "A+").clicked() {
+                    *font_size = (*font_size + 1.0).min(32.0);
+                }
             }
         });
     });
-    ui.separator();
+    // Compact separator
+    ui.add(egui::Separator::default().spacing(4.0));
 
     // 2. Measure and resize terminal
     let available = ui.available_size();
@@ -1249,9 +1265,10 @@ fn apply_touch_pinch_zoom(ctx: &egui::Context, font_size: &mut f32) -> bool {
 fn toolbar_button(ui: &mut egui::Ui, label: impl Into<egui::WidgetText>) -> egui::Response {
     ui.add(
         egui::Button::new(label.into())
-            .frame(false)
+            .fill(egui::Color32::TRANSPARENT)
+            .stroke(egui::Stroke::NONE)
             .corner_radius(style::CORNER_RADIUS_XS)
-            .sense(egui::Sense::CLICK),
+            .min_size(egui::vec2(26.0, 22.0)),
     )
 }
 
