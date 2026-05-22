@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn zsh_prompt_and_typed_char_visible() {
-        let prompt = b"%                                                                                                                      \r \r\r\x1b[01;32mdwh@dwh-82sk\x1b[00m \x1b[01;34mrust/rsterm\x1b[00m \x1b[33m(master) \x1b[00m\x1b[00m\xc2\xbb \x1b[?2004h";
+        let prompt = b"%                                                                                                                      \r \r\r\x1b[01;32mdwh@dwh-82sk\x1b[00m \x1b[01;34mrust/rsTerminal\x1b[00m \x1b[33m(master) \x1b[00m\x1b[00m\xc2\xbb \x1b[?2004h";
         let typed = b"a\x08\x08\x1b[31ma\x1b[39m";
         let mut term = Terminal::new(24, 120);
         term.write(prompt);
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn prompt_visible_after_full_screen_ls_output() {
-        let prompt = b"\r\n%                                                                                                                      \r \r\r\x1b[01;32mdwh@dwh-82sk\x1b[00m \x1b[01;34mrust/rsterm\x1b[00m \x1b[33m(master) \x1b[00m\x1b[00m\xc2\xbb \x1b[?2004h";
+        let prompt = b"\r\n%                                                                                                                      \r \r\r\x1b[01;32mdwh@dwh-82sk\x1b[00m \x1b[01;34mrust/rsTerminal\x1b[00m \x1b[33m(master) \x1b[00m\x1b[00m\xc2\xbb \x1b[?2004h";
         let mut body = String::new();
         for i in 0..34 {
             body.push_str(&format!("line{i:03} file.txt\n"));
@@ -229,7 +229,7 @@ mod tests {
         let pending = term.drain_pending();
         assert!(
             pending.is_empty(),
-            "CSI 8 must not resize the grid or PTY (window owned by rsterm), got {pending:?}"
+            "CSI 8 must not resize the grid or PTY (window owned by rsTerminal), got {pending:?}"
         );
         assert_eq!(term.screen.rows, 24);
         assert_eq!(term.screen.cols, 80);

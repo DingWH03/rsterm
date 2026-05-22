@@ -17,7 +17,7 @@ fi
 VERSION="$(grep '^version' Cargo.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
 DEB_VERSION="${VERSION}-1"
 
-echo "==> Building rsterm ${VERSION} for ${RUST_TARGET} (${DEB_ARCH})"
+echo "==> Building rsTerminal ${VERSION} for ${RUST_TARGET} (${DEB_ARCH})"
 
 export CARGO_TERM_COLOR=always
 export RUST_BACKTRACE=1
@@ -54,7 +54,7 @@ cargo deb "${deb_args[@]}"
 
 mkdir -p dist
 shopt -s nullglob
-DEBS=(target/debian/rsterm_*_"${DEB_ARCH}".deb)
+DEBS=(target/debian/rsTerminal_*_"${DEB_ARCH}".deb)
 if ((${#DEBS[@]} == 0)); then
   DEBS=(target/debian/*.deb)
 fi
@@ -63,7 +63,7 @@ if ((${#DEBS[@]} == 0)); then
   exit 1
 fi
 
-OUT="dist/rsterm_${DEB_VERSION}_${DEB_ARCH}.deb"
+OUT="dist/rsTerminal_${DEB_VERSION}_${DEB_ARCH}.deb"
 cp "${DEBS[0]}" "$OUT"
 echo "==> Wrote $OUT"
 ls -lh "$OUT"

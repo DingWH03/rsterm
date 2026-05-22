@@ -28,7 +28,7 @@ enum Page {
     Workspace,
 }
 
-pub struct RstermApp {
+pub struct RsTerminalApp {
     settings: AppSettings,
     saved_connections: Vec<SavedConnection>,
     sessions: Vec<WorkspaceSession>,
@@ -53,7 +53,7 @@ pub struct RstermApp {
     show_quit_dialog: bool,
 }
 
-impl Default for RstermApp {
+impl Default for RsTerminalApp {
     fn default() -> Self {
         let settings = crate::settings::load_settings();
         // Apply the saved language preference on startup.
@@ -170,7 +170,7 @@ fn show_connection_notice(ctx: &egui::Context, notice: &mut Option<String>) {
     }
 }
 
-impl RstermApp {
+impl RsTerminalApp {
     fn reload_terminal_fonts(&mut self, ctx: &egui::Context) {
         fonts::apply_terminal_fonts(ctx, &self.settings.default_profile().terminal_font);
         let font_gen = fonts::font_generation();
@@ -568,7 +568,7 @@ impl RstermApp {
     }
 }
 
-impl eframe::App for RstermApp {
+impl eframe::App for RsTerminalApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if ctx.input(|i| i.viewport().close_requested()) {
             if self.quit_after_close {
@@ -668,7 +668,7 @@ impl eframe::App for RstermApp {
                             if self.sidebar.hamburger(ui).clicked() {
                                 self.sidebar.hamburger_click(SidebarPage::Home);
                             }
-                            ui.label(egui::RichText::new("rsTerm").weak().size(13.0));
+                            ui.label(egui::RichText::new("rsTerminal").weak().size(13.0));
                         });
                         ui.separator();
                     }

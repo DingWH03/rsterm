@@ -36,8 +36,8 @@ reset: "重置"
 apply: "应用"
 
 # ---- 应用标题 ----
-app_title: "rsTerm - 多终端模拟器"
-quit_with_sessions_title: "退出 rsTerm"
+app_title: "rsTerminal - 多终端模拟器"
+quit_with_sessions_title: "退出 rsTerminal"
 quit_with_sessions_body: "仍有 %{count} 个未结束的会话，确定要退出吗？"
 quit_with_sessions_confirm: "退出"
 

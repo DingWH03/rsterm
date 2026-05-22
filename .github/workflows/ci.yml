@@ -49,8 +49,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rsterm-linux-x64
-          path: target/release/rsterm
+          name: rsTerminal-linux-x64
+          path: target/release/rsTerminal
           if-no-files-found: error
 
   windows:
@@ -69,8 +69,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rsterm-windows-x64
-          path: target/release/rsterm.exe
+          name: rsTerminal-windows-x64
+          path: target/release/rsTerminal.exe
           if-no-files-found: error
 
   deb:
@@ -155,7 +155,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rsterm-deb-${{ matrix.deb_arch }}
+          name: rsTerminal-deb-${{ matrix.deb_arch }}
           path: dist/*.deb
           if-no-files-found: error
 
@@ -196,8 +196,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rsterm-android-arm64
-          path: dist/rsterm-android-arm64-release.apk
+          name: rsTerminal-android-arm64
+          path: dist/rsTerminal-android-arm64-release.apk
           if-no-files-found: error
 
   release:
@@ -211,7 +211,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-          pattern: rsterm-*
+          pattern: rsTerminal-*
           merge-multiple: true
 
       - uses: softprops/action-gh-release@v2

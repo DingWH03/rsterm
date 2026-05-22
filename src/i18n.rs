@@ -1,4 +1,4 @@
-//! Internationalization (i18n) module for rsTerm.
+//! Internationalization (i18n) module for rsTerminal.
 //!
 //! Uses `rust-i18n` for translation loading and `sys-locale` for system locale detection.
 //! Supports runtime language switching and persists the choice in settings.

@@ -51,7 +51,7 @@
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
             <meta-data
                 android:name="android.app.lib_name"
-                android:value="rsterm" />
+                android:value="rsTerminal" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

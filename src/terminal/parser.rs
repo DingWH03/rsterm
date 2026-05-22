@@ -2,7 +2,7 @@
 pub enum TermEvent {
     /// Send response string to host (e.g. answer to `CSI 18 t`).
     Response(Vec<u8>),
-    /// Reserved: application `CSI 8` window resize (not used; rsterm owns geometry).
+    /// Reserved: application `CSI 8` window resize (not used; rsTerminal owns geometry).
     #[allow(dead_code)]
     PtyResize { rows: usize, cols: usize },
 }

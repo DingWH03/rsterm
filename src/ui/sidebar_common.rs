@@ -26,7 +26,7 @@ pub fn sidebar_brand_row(
             sidebar.hamburger_click(page);
         }
         ui.label(
-            egui::RichText::new("rsTerm")
+            egui::RichText::new("rsTerminal")
                 .size(17.0)
                 .strong()
                 .color(ui.visuals().text_color()),

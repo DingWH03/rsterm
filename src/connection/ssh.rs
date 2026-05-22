@@ -110,7 +110,7 @@ async fn run_ssh(
 
     let password = saved_password
         .or_else(|| std::env::var("SSH_PASSWORD").ok())
-        .or_else(|| std::env::var("RSTERM_SSH_PASSWORD").ok());
+        .or_else(|| std::env::var("RSTERMINAL_SSH_PASSWORD").ok());
 
     authenticate(&mut handle, user, password.as_deref()).await?;
 

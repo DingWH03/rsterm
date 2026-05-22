@@ -1,4 +1,4 @@
-# rsTerm
+# rsTerminal
 
 Multi terminal emulator with SSH, local PTY, serial, BLE, and a dual-pane file manager.
 
@@ -29,7 +29,7 @@ cargo install cross cargo-deb --locked
 ./packaging/build-deb.sh armv7-unknown-linux-gnueabihf armhf --cross
 ```
 
-Output: `dist/rsterm_<version>-1_<arch>.deb`
+Output: `dist/rsTerminal_<version>-1_<arch>.deb`
 
 ## Android APK
 
@@ -44,6 +44,6 @@ source packaging/android-env.sh
 Install:
 
 ```bash
-adb install -r dist/rsterm-android-arm64-release.apk
+adb install -r dist/rsTerminal-android-arm64-release.apk
 ```
 

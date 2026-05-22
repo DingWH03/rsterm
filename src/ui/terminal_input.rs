@@ -7,7 +7,7 @@ use crate::ui::keyboard::ctrl_byte_for_char;
 
 /// Stable focus id (must not depend on parent `Ui` id).
 pub fn terminal_widget_id() -> Id {
-    Id::new("rsterm_terminal_surface")
+    Id::new("rsTerminal_terminal_surface")
 }
 
 /// Inset between the panel edge and the cell grid (PTY size uses the inner area too).

@@ -36,8 +36,8 @@ reset: "Reset"
 apply: "Apply"
 
 # ---- App Title ----
-app_title: "rsTerm - Multi Terminal Emulator"
-quit_with_sessions_title: "Quit rsTerm"
+app_title: "rsTerminal - Multi Terminal Emulator"
+quit_with_sessions_title: "Quit rsTerminal"
 quit_with_sessions_body: "%{count} session(s) are still open. Quit anyway?"
 quit_with_sessions_confirm: "Quit"
 

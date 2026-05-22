@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build rsTerm Android APK: Rust (cargo-ndk) + Gradle.
+# Build rsTerminal Android APK: Rust (cargo-ndk) + Gradle.
 #
 #   ./packaging/build-apk.sh              # debug APK, arm64-v8a
 #   ./packaging/build-apk.sh release       # release APK
@@ -35,8 +35,8 @@ else
   cargo ndk -o "$JNI_LIBS" -t "${NDK_TARGETS[@]}" -P 34 build --lib
 fi
 
-if [[ ! -f "$JNI_LIBS/arm64-v8a/librsterm.so" ]]; then
-  echo "error: librsterm.so not found under $JNI_LIBS" >&2
+if [[ ! -f "$JNI_LIBS/arm64-v8a/librsTerminal.so" ]]; then
+  echo "error: librsTerminal.so not found under $JNI_LIBS" >&2
   exit 1
 fi
 
@@ -77,7 +77,7 @@ else
 fi
 
 mkdir -p "$ROOT/dist"
-OUT_NAME="rsterm-android-arm64"
+OUT_NAME="rsTerminal-android-arm64"
 if [[ "$BUILD_TYPE" == "release" ]]; then
   OUT_NAME="${OUT_NAME}-release"
 else

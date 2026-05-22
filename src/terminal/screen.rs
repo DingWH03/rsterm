@@ -2256,7 +2256,7 @@ impl TermHandler for Screen {
                 match ps {
                     8 => {
                         // xterm: application asks the *terminal emulator* to resize its window.
-                        // rsterm owns window geometry from the egui layout; honoring CSI 8 here would
+                        // rsTerminal owns window geometry from the egui layout; honoring CSI 8 here would
                         // let stale ncurses LINES/COLS snap the PTY back after a UI resize (htop 3.x).
                         // Size changes are delivered via kernel winsize + SIGWINCH instead (like Konsole).
                     }

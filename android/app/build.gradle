@@ -4,17 +4,17 @@ plugins {
 
 // Single source of truth: ../Cargo.toml [package].version
 def cargoToml = rootProject.file("../Cargo.toml")
-def rstermVersionName = "0.0.0"
+def rsTerminalVersionName = "0.0.0"
 def cargoVersionMatcher = (cargoToml.exists() ? cargoToml.text : "") =~ /(?m)^version\s*=\s*"([^"]+)"/
 if (cargoVersionMatcher.find()) {
-    rstermVersionName = cargoVersionMatcher.group(1)
+    rsTerminalVersionName = cargoVersionMatcher.group(1)
 }
-def versionParts = rstermVersionName.split("\\.")
+def versionParts = rsTerminalVersionName.split("\\.")
 def vMajor = (versionParts.length > 0 ? versionParts[0] : "0") as int
 def vMinor = (versionParts.length > 1 ? versionParts[1] : "0") as int
 def vPatch = (versionParts.length > 2 ? versionParts[2].replaceAll(/[^0-9].*$/, "") : "0") as int
 // versionCode must increase each release; derived from semver (each part < 100).
-def rstermVersionCode = vMajor * 10000 + vMinor * 100 + vPatch
+def rsTerminalVersionCode = vMajor * 10000 + vMinor * 100 + vPatch
 
 def signingProps = new Properties()
 def signingPropsFile = rootProject.file("signing.properties")
@@ -27,15 +27,15 @@ def releaseKeystore = signingProps["storeFile"]
         : null
 
 android {
-    namespace "dev.rsterm.app"
+    namespace "dev.rsTerminal.app"
     compileSdk 34
 
     defaultConfig {
-        applicationId "dev.rsterm.app"
+        applicationId "dev.rsTerminal.app"
         minSdk 24
         targetSdk 34
-        versionCode rstermVersionCode
-        versionName rstermVersionName
+        versionCode rsTerminalVersionCode
+        versionName rsTerminalVersionName
     }
 
     compileOptions {

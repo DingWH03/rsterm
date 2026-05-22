@@ -1,4 +1,4 @@
-//! rsTerm library (desktop `bin` + Android `cdylib`).
+//! rsTerminal library (desktop `bin` + Android `cdylib`).
 
 #![cfg_attr(
     all(target_os = "windows", not(debug_assertions)),
@@ -21,12 +21,12 @@ pub mod storage;
 pub mod terminal;
 pub mod ui;
 
-use app::RstermApp;
+use app::RsTerminalApp;
 use log::info;
 
 pub fn run_app(native_options: eframe::NativeOptions) {
     if let Err(e) = eframe::run_native(
-        "rsTerm",
+        "rsTerminal",
         native_options,
         Box::new(|cc| {
             let settings = crate::settings::load_settings();
@@ -37,7 +37,7 @@ pub fn run_app(native_options: eframe::NativeOptions) {
             );
             fonts::preload_monospace_catalog();
             fonts::tune_android_display(&cc.egui_ctx);
-            Ok(Box::new(RstermApp::default()))
+            Ok(Box::new(RsTerminalApp::default()))
         }),
     ) {
         info!("Failed to start: {e}");
@@ -96,7 +96,7 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
         android_app: Some(app),
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1024.0, 768.0])
-            .with_title("rsTerm"),
+            .with_title("rsTerminal"),
         ..Default::default()
     };
 

@@ -1,9 +1,9 @@
 [Desktop Entry]
-Name=rsTerm
+Name=rsTerminal
 GenericName=Terminal Emulator
 Comment=Multi terminal emulator with SSH, serial, and file manager
-Exec=rsterm
+Exec=rsTerminal
 Terminal=false
 Type=Application
 Categories=System;TerminalEmulator;
-StartupWMClass=rsterm
+StartupWMClass=rsTerminal

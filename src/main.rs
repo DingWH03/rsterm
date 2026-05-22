@@ -2,7 +2,7 @@
 
 #[cfg(not(target_os = "android"))]
 fn main() {
-    rsterm::run_desktop();
+    rsTerminal::run_desktop();
 }
 
 #[cfg(target_os = "android")]

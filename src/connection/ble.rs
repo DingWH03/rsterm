@@ -27,18 +27,18 @@ const NUS_RX_UUID: &str = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
 /// NUS TX: peripheral -> central, subscribe here.
 const NUS_TX_UUID: &str = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
 
-/// RSTerm example multi-UART service used by the ESP32-C3 sketch.
-const RSTERM_MULTI_UART_SERVICE_UUID: &str = "B7E40001-B5A3-F393-E0A9-E50E24DCCA9E";
-const RSTERM_UART0_TX_UUID: &str = "B7E40002-B5A3-F393-E0A9-E50E24DCCA9E";
-const RSTERM_UART0_RX_UUID: &str = "B7E40003-B5A3-F393-E0A9-E50E24DCCA9E";
-const RSTERM_UART1_TX_UUID: &str = "B7E40004-B5A3-F393-E0A9-E50E24DCCA9E";
-const RSTERM_UART1_RX_UUID: &str = "B7E40005-B5A3-F393-E0A9-E50E24DCCA9E";
+/// rsTerminal example multi-UART service used by the ESP32-C3 sketch.
+const RSTERMINAL_MULTI_UART_SERVICE_UUID: &str = "B7E40001-B5A3-F393-E0A9-E50E24DCCA9E";
+const RSTERMINAL_UART0_TX_UUID: &str = "B7E40002-B5A3-F393-E0A9-E50E24DCCA9E";
+const RSTERMINAL_UART0_RX_UUID: &str = "B7E40003-B5A3-F393-E0A9-E50E24DCCA9E";
+const RSTERMINAL_UART1_TX_UUID: &str = "B7E40004-B5A3-F393-E0A9-E50E24DCCA9E";
+const RSTERMINAL_UART1_RX_UUID: &str = "B7E40005-B5A3-F393-E0A9-E50E24DCCA9E";
 
 /// Optional future-proof mux profile: one TX/RX pair carries framed logical ports.
 /// Frame format: port:u8, type:u8, len:u16 little-endian, payload[len].
-const RSTERM_MUX_SERVICE_UUID: &str = "7A6E0001-B5A3-F393-E0A9-E50E24DCCA9E";
-const RSTERM_MUX_RX_UUID: &str = "7A6E0002-B5A3-F393-E0A9-E50E24DCCA9E";
-const RSTERM_MUX_TX_UUID: &str = "7A6E0003-B5A3-F393-E0A9-E50E24DCCA9E";
+const RSTERMINAL_MUX_SERVICE_UUID: &str = "7A6E0001-B5A3-F393-E0A9-E50E24DCCA9E";
+const RSTERMINAL_MUX_RX_UUID: &str = "7A6E0002-B5A3-F393-E0A9-E50E24DCCA9E";
+const RSTERMINAL_MUX_TX_UUID: &str = "7A6E0003-B5A3-F393-E0A9-E50E24DCCA9E";
 const MUX_FRAME_DATA: u8 = 0x01;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,29 +63,29 @@ struct KnownBleProfile {
     ports: &'static [KnownPortPair],
 }
 
-static RSTERM_MULTI_UART_PORTS: &[KnownPortPair] = &[
+static RSTERMINAL_MULTI_UART_PORTS: &[KnownPortPair] = &[
     KnownPortPair {
         port: 0,
         name: "UART0",
         kind: ConnectionPortKind::Serial,
-        tx_uuid: RSTERM_UART0_TX_UUID,
-        rx_uuid: RSTERM_UART0_RX_UUID,
+        tx_uuid: RSTERMINAL_UART0_TX_UUID,
+        rx_uuid: RSTERMINAL_UART0_RX_UUID,
     },
     KnownPortPair {
         port: 1,
         name: "UART1",
         kind: ConnectionPortKind::Serial,
-        tx_uuid: RSTERM_UART1_TX_UUID,
-        rx_uuid: RSTERM_UART1_RX_UUID,
+        tx_uuid: RSTERMINAL_UART1_TX_UUID,
+        rx_uuid: RSTERMINAL_UART1_RX_UUID,
     },
 ];
 
-static RSTERM_MUX_PORTS: &[KnownPortPair] = &[KnownPortPair {
+static RSTERMINAL_MUX_PORTS: &[KnownPortPair] = &[KnownPortPair {
     port: 0,
     name: "MUX",
     kind: ConnectionPortKind::Terminal,
-    tx_uuid: RSTERM_MUX_TX_UUID,
-    rx_uuid: RSTERM_MUX_RX_UUID,
+    tx_uuid: RSTERMINAL_MUX_TX_UUID,
+    rx_uuid: RSTERMINAL_MUX_RX_UUID,
 }];
 
 static NUS_PORTS: &[KnownPortPair] = &[KnownPortPair {
@@ -130,14 +130,14 @@ static DFB_PORTS: &[KnownPortPair] = &[KnownPortPair {
 
 static KNOWN_BLE_PROFILES: &[KnownBleProfile] = &[
     KnownBleProfile {
-        service_uuid: RSTERM_MULTI_UART_SERVICE_UUID,
+        service_uuid: RSTERMINAL_MULTI_UART_SERVICE_UUID,
         protocol: BleProtocol::MultiCharacteristic,
-        ports: RSTERM_MULTI_UART_PORTS,
+        ports: RSTERMINAL_MULTI_UART_PORTS,
     },
     KnownBleProfile {
-        service_uuid: RSTERM_MUX_SERVICE_UUID,
+        service_uuid: RSTERMINAL_MUX_SERVICE_UUID,
         protocol: BleProtocol::MuxFrames,
-        ports: RSTERM_MUX_PORTS,
+        ports: RSTERMINAL_MUX_PORTS,
     },
     KnownBleProfile {
         service_uuid: NUS_SERVICE_UUID,
@@ -410,7 +410,7 @@ fn discover_uart(services: &BTreeSet<Service>) -> Option<BleDiscovery> {
 }
 
 // ---------------------------------------------------------------------------
-// Optional RSTerm mux frame support
+// Optional rsTerminal mux frame support
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
@@ -621,7 +621,7 @@ pub fn connect_ble(config: &SavedConnection) -> Result<ConnectionHandle, String>
                 None => {
                     let msg = "Could not find a suitable BLE terminal/UART service on this device.\n\
                                A compatible device must expose Notify/Indicate + Write characteristics,\n\
-                               or the RSTerm BLE MUX profile."
+                               or the rsTerminal BLE MUX profile."
                         .to_string();
                     let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Error(msg)));
                     let _ = peripheral.disconnect().await;
