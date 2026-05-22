@@ -42,14 +42,14 @@ const BOTTOM_BAR_H: f32 = 40.0;
 const CONTEXT_MENU_MIN_WIDTH: f32 = 140.0;
 /// Right-click and touch long-press both open the same context menu.
 fn install_context_menu(
-    ui: &egui::Ui,
+    _ui: &egui::Ui,
     resp: &egui::Response,
     mut build: impl FnMut(&mut egui::Ui),
 ) {
     let menu_id = resp.id.with("ctx_popup");
     resp.context_menu(|ui| build(ui));
     if resp.long_touched() {
-        resp.ctx.memory_mut(|m| m.open_popup(menu_id));
+        egui::Popup::open_id(&resp.ctx, menu_id);
     }
     let long_touch_open = resp
         .long_touched()
@@ -233,7 +233,7 @@ pub fn file_manager_view(
 fn paint_pane_column<R>(ui: &mut egui::Ui, size: egui::Vec2, body: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let rect = egui::Rect::from_min_size(ui.cursor().min, size);
     let _ = ui.allocate_exact_size(size, egui::Sense::hover());
-    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), body)
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), body)
         .inner
 }
 
@@ -459,7 +459,7 @@ fn paint_local_pane(
     status: &mut Option<String>,
     rename_dialog: &mut RenameDialog,
     info_dialog: &mut InfoDialog,
-    remote_client: Option<&Arc<SftpClient>>,
+    _remote_client: Option<&Arc<SftpClient>>,
     scroll_id: &str,
     has_clipboard: bool,
     block_keyboard: bool,
@@ -599,7 +599,7 @@ fn paint_bottom_action_bar(
 fn paint_file_list_area(
     ui: &mut egui::Ui,
     pane_focus_id: egui::Id,
-    scroll_id: &str,
+    _scroll_id: &str,
     list_h: f32,
     select_mode: bool,
     has_clipboard: bool,
@@ -615,7 +615,7 @@ fn paint_file_list_area(
     }
 
     let mut interacted = ui
-        .allocate_new_ui(egui::UiBuilder::new().max_rect(list_rect), |ui| {
+        .scope_builder(egui::UiBuilder::new().max_rect(list_rect), |ui| {
             paint_list(ui, ops)
         })
         .inner;
@@ -634,8 +634,8 @@ fn paint_remote_list(
     scroll_id: &str,
     remote: &mut RemotePane,
     anchor: &mut Option<usize>,
-    clipboard: &mut Option<FileClipboard>,
-    status: &mut Option<String>,
+    _clipboard: &mut Option<FileClipboard>,
+    _status: &mut Option<String>,
     block_keyboard: bool,
     is_active: bool,
     list_max_height: f32,
@@ -708,8 +708,8 @@ fn paint_local_list(
     scroll_id: &str,
     pane: &mut PaneState,
     anchor: &mut Option<usize>,
-    clipboard: &mut Option<FileClipboard>,
-    status: &mut Option<String>,
+    _clipboard: &mut Option<FileClipboard>,
+    _status: &mut Option<String>,
     block_keyboard: bool,
     is_active: bool,
     list_max_height: f32,
@@ -785,7 +785,7 @@ fn handle_list_keyboard(
     anchor: &mut Option<usize>,
     ops: &mut PaneOps,
 ) {
-    if ui.ctx().wants_keyboard_input() {
+    if ui.ctx().egui_wants_keyboard_input() {
         return;
     }
 

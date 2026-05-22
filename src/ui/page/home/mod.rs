@@ -192,6 +192,41 @@ fn paint_fab(ui: &mut egui::Ui, fab_clicked: &mut bool) {
     }
 }
 
+/// Build a subtitle line combining connection type and its key details.
+fn conn_subtitle(conn: &SavedConnection) -> String {
+    let type_label = conn.conn_type.label();
+    let detail = match conn.conn_type {
+        ConnectionType::Ssh => {
+            let user = conn.ssh_user.as_deref().unwrap_or("root");
+            let host = conn.ssh_host.as_deref().unwrap_or("?");
+            let port = conn.ssh_port.unwrap_or(22);
+            format!("{user}@{host}:{port}")
+        }
+        ConnectionType::Serial => {
+            let port = conn.serial_port.as_deref().unwrap_or("?");
+            if let Some(baud) = conn.serial_baud {
+                format!("{port} @ {baud} baud")
+            } else {
+                port.to_string()
+            }
+        }
+        ConnectionType::Ble => conn
+            .ble_device
+            .as_deref()
+            .unwrap_or("?")
+            .to_string(),
+        ConnectionType::Local => {
+            let wd = conn
+                .working_dir
+                .as_deref()
+                .unwrap_or("~");
+            let shell = conn.shell.as_deref().unwrap_or("default");
+            format!("{shell} · {wd}")
+        }
+    };
+    format!("{type_label}  ·  {detail}")
+}
+
 // ─── Card constants ───────────────────────────────────────────────────────────
 
 const CARD_ICON_FONT: f32 = 22.0;
@@ -432,13 +467,15 @@ fn render_connection_card(
             ui.visuals().text_color(),
         );
 
-        // Type label
+        // Type + key detail (subtitle)
+        let toolbar_w = style::CardToolbar::reserved_width(show_file, true);
+        let max_text_w = (rect.right() - text_left - toolbar_w).max(60.0);
         let sub_g = ui.fonts_mut(|f| {
             f.layout(
-                conn.conn_type.label().to_string(),
-                egui::FontId::proportional(13.0),
+                conn_subtitle(conn),
+                egui::FontId::proportional(12.0),
                 ui.visuals().weak_text_color(),
-                f32::INFINITY,
+                max_text_w,
             )
         });
         ui.painter_at(rect).galley(

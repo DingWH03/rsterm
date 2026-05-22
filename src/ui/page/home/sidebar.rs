@@ -2,7 +2,6 @@ use crate::session::WorkspaceSession;
 use crate::ui::widget::sidebar::Sidebar;
 use crate::ui::widget::sidebar::SidebarPage;
 use crate::ui::widget::sidebar::common::{nav_button, sidebar_brand_row, sidebar_sessions_panel, SidebarSessionAction};
-use crate::ui::widget::style;
 
 pub struct HomeSidebarResult {
     pub nav: HomeSidebarAction,

@@ -23,7 +23,7 @@ use crate::ui::widget::sidebar::{Sidebar, SidebarPage};
 use crate::ui::widget::style;
 use crate::ui::page::terminal::input::{
     allocate_terminal_surface, lock_terminal_focus, process_keyboard_input,
-    sync_android_soft_input, terminal_widget_id, TERMINAL_GRID_MARGIN,
+    terminal_widget_id, TERMINAL_GRID_MARGIN,
 };
 use crate::ui::page::terminal::paint::{paint_row, RowGalleyCache};
 use crate::ui::page::terminal::mouse::{

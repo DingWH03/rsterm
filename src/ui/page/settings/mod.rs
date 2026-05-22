@@ -583,7 +583,7 @@ fn preset_combo_row(ui: &mut egui::Ui, layout: SettingsFormLayout, label: &str, 
 
 fn general_tab(ui: &mut egui::Ui, settings: &mut AppSettings) {
     section_form(ui, &rust_i18n::t!("settings_tab_general"), "", "general_main", |ui, layout| {
-        layout.form_row(ui, &rust_i18n::t!("language"), |ui, layout| {
+        layout.form_row(ui, &rust_i18n::t!("language"), |ui, _layout| {
             egui::ComboBox::from_id_salt("language_selector")
                 .selected_text(settings.language.label())
                 .width(SettingsFormLayout::control_width(ui))

@@ -34,7 +34,6 @@ pub struct Parser {
     current_param: i64,
     osc_buf: Vec<u8>,
     dcs_buf: Vec<u8>,
-    ignore_flag: bool,
     utf8_pending: Vec<u8>,
 }
 
@@ -47,7 +46,6 @@ impl Parser {
             current_param: 0,
             osc_buf: Vec::new(),
             dcs_buf: Vec::new(),
-            ignore_flag: false,
             utf8_pending: Vec::new(),
         }
     }
@@ -488,11 +486,6 @@ impl Parser {
                 self.intermediates.clear();
                 self.state = State::Ground;
             }
-            0x07 => {
-                self.dcs_buf.clear();
-                self.intermediates.clear();
-                self.state = State::Ground;
-            }
             0x7F => handler.execute(byte),
             _ => {}
         }
@@ -507,7 +500,6 @@ impl Parser {
                 handler.execute(byte);
                 self.state = State::Ground;
             }
-            0x07 => self.state = State::Ground,
             0x7F => handler.execute(byte),
             _ => {}
         }

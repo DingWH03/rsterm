@@ -128,6 +128,7 @@ pub(crate) fn trimmed_row_len(cells: &[Cell]) -> usize {
 
 /// Convert a physical screen row (with wide_continuation) to logical cells.
 /// Trailing spaces are stripped; wide_continuation slots are skipped.
+#[allow(dead_code)]
 pub(crate) fn row_to_logical_cells(row: &[Cell]) -> Vec<LogicalCell> {
     row_to_logical_cells_with_trim(row, true)
 }
@@ -209,6 +210,7 @@ fn row_to_logical_cells_with_trim(row: &[Cell], trim_trailing_spaces: bool) -> V
 
 /// Layout a logical line into visual screen rows for the given terminal width.
 /// This handles character wrapping and adds wide_continuation markers.
+#[allow(dead_code)]
 pub(crate) fn layout_logical_line(line: &LogicalLine, cols: usize) -> Vec<Vec<Cell>> {
     if cols == 0 {
         return vec![vec![]];
@@ -1198,6 +1200,7 @@ impl Screen {
     /// terminal becomes narrower.  The renderer must only paint columns
     /// `0..self.cols`; cells beyond `self.cols` are hidden preservation data and
     /// will become visible again if the terminal grows.
+    #[allow(dead_code)]
     fn resize_row_keep_tail(src: &[Cell], cols: usize) -> Vec<Cell> {
         let target_len = src.len().max(cols);
         let mut row_cells = vec![Cell::default(); target_len];
@@ -1224,6 +1227,7 @@ impl Screen {
             .collect()
     }
 
+    #[allow(dead_code)]
     fn resize_grid_keep_tails(cells: &[Vec<Cell>], old_rows: usize, rows: usize, cols: usize) -> Vec<Vec<Cell>> {
         (0..rows)
             .map(|r| {
@@ -1632,7 +1636,7 @@ impl Screen {
             if self.cells[y]
                 .iter()
                 .take(self.cols.min(self.cells[y].len()))
-                .any(|c| (c.ch != ' ' || c.wide_continuation))
+                .any(|c| c.ch != ' ' || c.wide_continuation)
             {
                 last = last.max(y);
             }
