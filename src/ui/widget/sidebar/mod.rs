@@ -63,6 +63,12 @@ impl Sidebar {
         }
     }
 
+    pub fn open_overlay(&mut self) {
+        if !self.wide {
+            self.overlay_open = true;
+        }
+    }
+
     pub fn close_overlay(&mut self) {
         self.overlay_open = false;
     }

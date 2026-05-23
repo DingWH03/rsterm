@@ -43,7 +43,7 @@
         android:icon="@android:drawable/sym_def_app_icon">
 
         <activity
-            android:name="android.app.NativeActivity"
+            android:name="android.app.GameActivity"
             android:exported="true"
             android:configChanges="density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|uiMode"
             android:screenOrientation="unspecified"

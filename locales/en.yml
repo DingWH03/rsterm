@@ -56,6 +56,12 @@ sidebar_home: "Home"
 sidebar_connections: "Connections"
 sidebar_no_sessions: "No active sessions"
 
+# ---- Recent Connections ----
+recent_connections: "Recent Connections"
+view_all: "View All"
+no_active_terminal: "No active terminal"
+open_terminal_hint: "Open a terminal session to get started"
+
 # ---- Connection Dialog ----
 dialog_edit_connection: "Edit Connection"
 dialog_new_connection: "New Connection"

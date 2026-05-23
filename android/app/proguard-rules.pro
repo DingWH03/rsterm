@@ -6,3 +6,4 @@
 -keepclassmembers class io.github.gedgygedgy.** { native <methods>; }
 -dontwarn com.nonpolynomial.**
 -dontwarn io.github.gedgygedgy.**
+

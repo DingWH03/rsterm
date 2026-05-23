@@ -56,6 +56,12 @@ sidebar_home: "首页"
 sidebar_connections: "连接"
 sidebar_no_sessions: "无活动会话"
 
+# ---- 最近连接 ----
+recent_connections: "最近连接"
+view_all: "查看全部"
+no_active_terminal: "没有活动的终端"
+open_terminal_hint: "打开一个终端会话开始使用"
+
 # ---- 连接对话框 ----
 dialog_edit_connection: "编辑连接"
 dialog_new_connection: "新建连接"

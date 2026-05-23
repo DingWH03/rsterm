@@ -199,7 +199,7 @@ fn paint_fab(ui: &mut egui::Ui, fab_clicked: &mut bool) {
 }
 
 /// Build a subtitle line combining connection type and its key details.
-fn conn_subtitle(conn: &SavedConnection) -> String {
+pub fn conn_subtitle(conn: &SavedConnection) -> String {
     let type_label = conn.conn_type.label();
     let detail = match conn.conn_type {
         ConnectionType::Ssh => {
