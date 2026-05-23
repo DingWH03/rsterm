@@ -203,7 +203,6 @@ impl FileManagerSession {
 
     pub fn open_ssh(config: &crate::storage::types::SavedConnection) -> Result<Self, String> {
         let client = SftpClient::connect(config)?;
-        let home = client.home_dir().unwrap_or_else(|_| "/".to_string());
         let host = config.ssh_host.as_deref().unwrap_or("host");
         let title = format!("Remote: {host}");
         Ok(Self {
@@ -213,7 +212,9 @@ impl FileManagerSession {
             mode: FileManagerMode::SshSftp,
             remote: Some(RemotePane {
                 client: Arc::new(client),
-                cwd: home,
+                // Start at "/"; the first refresh will load it. The real home
+                // will be resolved once the SFTP connection is ready.
+                cwd: "/".to_string(),
                 entries: Vec::new(),
                 selected: HashSet::new(),
                 select_mode: false,

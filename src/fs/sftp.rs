@@ -1,13 +1,13 @@
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, UNIX_EPOCH};
 
 use russh::client::{self, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::{load_secret_key, PrivateKeyWithHashAlg};
 use russh_sftp::client::SftpSession;
-use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::connection::ssh_keys;
@@ -16,9 +16,17 @@ use crate::fs::transfer_progress::ByteProgress;
 use crate::fs::FileEntry;
 use crate::storage::types::SavedConnection;
 
+#[derive(Clone)]
+enum SftpStatus {
+    Connecting,
+    Connected,
+    Error(String),
+}
+
 pub struct SftpClient {
     req_tx: mpsc::Sender<SftpRequest>,
     _thread: JoinHandle<()>,
+    status: Arc<Mutex<SftpStatus>>,
 }
 
 enum SftpRequest {
@@ -95,8 +103,10 @@ impl SftpClient {
         let password = conn.ssh_password.clone();
 
         let (req_tx, req_rx) = mpsc::channel();
+        let status: Arc<Mutex<SftpStatus>> = Arc::new(Mutex::new(SftpStatus::Connecting));
+        let thread_status = status.clone();
         let thread = thread::spawn(move || {
-            if let Err(e) = sftp_worker(&host, port, &user, password, req_rx) {
+            if let Err(e) = sftp_worker(&host, port, &user, password, req_rx, thread_status) {
                 log::error!("SFTP worker ended: {e}");
             }
         });
@@ -104,7 +114,19 @@ impl SftpClient {
         Ok(Self {
             req_tx,
             _thread: thread,
+            status,
         })
+    }
+
+    pub fn is_connected(&self) -> bool {
+        matches!(*self.status.lock().unwrap(), SftpStatus::Connected)
+    }
+
+    pub fn connection_error(&self) -> Option<String> {
+        match &*self.status.lock().unwrap() {
+            SftpStatus::Error(e) => Some(e.clone()),
+            _ => None,
+        }
     }
 
     fn call<T>(&self, build: impl FnOnce(mpsc::SyncSender<Result<T, String>>) -> SftpRequest) -> Result<T, String> {
@@ -213,19 +235,50 @@ impl Drop for SftpClient {
     }
 }
 
+macro_rules! reply_err {
+    ($req:expr, $err:expr) => {
+        match $req {
+            SftpRequest::List { reply, .. } => { let _ = reply.send(Err($err.to_string())); }
+            SftpRequest::Upload { reply, .. } => { let _ = reply.send(Err($err.to_string())); }
+            SftpRequest::Download { reply, .. } => { let _ = reply.send(Err($err.to_string())); }
+            SftpRequest::Stat { reply, .. } => { let _ = reply.send(Err($err.to_string())); }
+            SftpRequest::PathBytes { reply, .. } => { let _ = reply.send(Err($err.to_string())); }
+            SftpRequest::Remove { reply, .. } => { let _ = reply.send(Err($err.to_string())); }
+            SftpRequest::Mkdir { reply, .. } => { let _ = reply.send(Err($err.to_string())); }
+            SftpRequest::Rename { reply, .. } => { let _ = reply.send(Err($err.to_string())); }
+            SftpRequest::Home { reply } => { let _ = reply.send(Err($err.to_string())); }
+            SftpRequest::Shutdown => {}
+        }
+    };
+}
+
 fn sftp_worker(
     host: &str,
     port: u16,
     user: &str,
     password: Option<String>,
     req_rx: mpsc::Receiver<SftpRequest>,
+    status: Arc<Mutex<SftpStatus>>,
 ) -> Result<(), String> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
 
-    let sftp = rt.block_on(connect_sftp(host, port, user, password.as_deref()))?;
+    let sftp = match rt.block_on(connect_sftp(host, port, user, password.as_deref())) {
+        Ok(sftp) => {
+            *status.lock().unwrap() = SftpStatus::Connected;
+            sftp
+        }
+        Err(e) => {
+            *status.lock().unwrap() = SftpStatus::Error(e.clone());
+            // Drain all pending and future requests with the error.
+            while let Ok(req) = req_rx.recv() {
+                reply_err!(req, &e);
+            }
+            return Err(e);
+        }
+    };
     sftp.set_timeout(120);
 
     while let Ok(req) = req_rx.recv() {

@@ -346,14 +346,21 @@ fn paste_into_pane(session: &mut FileManagerSession, pane: FileActivePane) {
 fn refresh_if_needed(session: &mut FileManagerSession) {
     if let Some(remote) = session.remote.as_mut() {
         if remote.loading {
-            remote.loading = false;
-            match remote.client.list_dir(&remote.cwd) {
-                Ok(entries) => {
-                    remote.entries = entries;
-                    remote.error = None;
+            // Check if the SFTP connection is ready yet.
+            if let Some(err) = remote.client.connection_error() {
+                remote.loading = false;
+                remote.error = Some(err);
+            } else if remote.client.is_connected() {
+                remote.loading = false;
+                match remote.client.list_dir(&remote.cwd) {
+                    Ok(entries) => {
+                        remote.entries = entries;
+                        remote.error = None;
+                    }
+                    Err(e) => remote.error = Some(e),
                 }
-                Err(e) => remote.error = Some(e),
             }
+            // else: still connecting — keep loading = true, try again next frame
         }
     }
     if let Some(left) = session.left_local.as_mut() {
