@@ -109,11 +109,17 @@ pub fn init_platform() {
 }
 
 /// Android-specific initialisation (called from `lib.rs`).
+///
+/// Safe to call multiple times (e.g. after an Activity restart in the same
+/// process when the user presses back and re-launches the app).
 #[cfg(target_os = "android")]
 pub fn init_android_platform(app: &winit::platform::android::activity::AndroidApp) {
     android::init(app);
-    let p: Box<dyn Platform> = Box::new(android::AndroidPlatform);
-    PLATFORM.set(p).expect("platform already initialised");
+    // If the platform was already initialised (same-process Activity restart),
+    // skip – do NOT panic.  The static `PLATFORM` trait object is still valid.
+    if PLATFORM.set(Box::new(android::AndroidPlatform)).is_err() {
+        log::info!("platform already initialised (activity restart)");
+    }
 }
 
 

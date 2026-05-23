@@ -47,6 +47,8 @@ pub struct RsTerminalApp {
     quit_after_close: bool,
     /// Show「仍有会话，是否退出」dialog.
     show_quit_dialog: bool,
+    /// First frame flag – ignore stale close_requested from Android lifecycle.
+    first_frame: bool,
 }
 
 impl Default for RsTerminalApp {
@@ -72,6 +74,7 @@ impl Default for RsTerminalApp {
             settings_open: false,
             connection_notice: None,
             quit_after_close: false,
+            first_frame: true,
             show_quit_dialog: false,
         }
     }
@@ -522,12 +525,29 @@ impl RsTerminalApp {
 
 impl eframe::App for RsTerminalApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Ignore stale close_requested + BrowserBack on the first frame.
+        if self.first_frame {
+            self.first_frame = false;
+            if ctx.input(|i| i.viewport().close_requested()) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
+            ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::NONE, egui::Key::BrowserBack);
+            });
+            return;
+        }
         if ctx.input(|i| i.viewport().close_requested()) {
             if self.quit_after_close {
                 return;
             }
             if self.handle_back_navigation(ctx) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            } else {
+                // No navigation possible – the app should exit.
+                // Ensure the Android Activity is properly finished so the
+                // system doesn't keep a stale task around.
+                #[cfg(target_os = "android")]
+                crate::platform::android_back::finish_activity();
             }
         }
     }
@@ -535,21 +555,28 @@ impl eframe::App for RsTerminalApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
-        // Android back button: handle both the JNI signal (from
-        // onBackPressed/OnBackInvokedCallback) and the direct key
-        // event (KEYCODE_BACK → NamedKey::BrowserBack from AInputQueue).
+        // Android back button.
         #[cfg(target_os = "android")]
         {
-            let back_via_jni = crate::platform::android_back::consume_back_pressed(|| {
-                self.handle_back_navigation(&ctx)
+            use crate::platform::android_back;
+
+            // Path A: JNI signal from onBackPressed / OnBackInvokedCallback.
+            android_back::consume_back_pressed(|| {
+                if self.handle_back_navigation(&ctx) {
+                    true
+                } else {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    true
+                }
             });
-            let back_via_key = ctx.input_mut(|i| {
-                i.consume_key(egui::Modifiers::NONE, egui::Key::BrowserBack)
-            });
-            if back_via_key {
-                self.handle_back_navigation(&ctx);
+
+            // Path B: KEYCODE_BACK → egui::Key::BrowserBack from AInputQueue.
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::BrowserBack))
+            {
+                if !self.handle_back_navigation(&ctx) {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
             }
-            let _ = back_via_jni;
         }
         // Apply UI theme on every frame (cheap — only changes if setting changed).
         self.settings.ui_theme.apply(&ctx);

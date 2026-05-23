@@ -64,10 +64,25 @@ pub fn run_desktop() {
     run_app(native_options);
 }
 
+/// Serialises `android_main` so that the previous eframe event-loop is fully
+/// torn down before a new one starts (Android may recreate the Activity in
+/// the same process while the old thread is still shutting down).
+#[cfg(target_os = "android")]
+static ANDROID_MAIN_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Android entry (winit / eframe). Loaded via `NativeActivity` + `android.app.lib_name`.
+///
+/// When Android recreates the Activity in the same process (user presses back
+/// and re-launches), a new thread is spawned for `android_main` while the
+/// previous one may still be shutting down.  The `ANDROID_MAIN_GUARD` mutex
+/// ensures only one instance runs at a time, preventing eframe / winit state
+/// conflicts.
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: winit::platform::android::activity::AndroidApp) {
+    // ── Drain any previous eframe event-loop before starting a new one ──
+    let _guard = ANDROID_MAIN_GUARD.lock().unwrap();
+
     android_logger::init_once(
         android_logger::Config::default().with_max_level(log::LevelFilter::Info),
     );

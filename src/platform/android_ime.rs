@@ -1,18 +1,20 @@
 //! Android IME / system keyboard insets (`content_rect` shrinks when soft input is visible).
 //! Also provides the status-bar inset so content is not drawn under the system UI.
 
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use egui::Context;
 use jni::{jni_sig, jni_str, JavaVM};
 use winit::platform::android::activity::AndroidApp;
 
-static ANDROID_APP: OnceLock<AndroidApp> = OnceLock::new();
+/// Updated on each Activity restart so `bottom_inset_points` always has a
+/// valid (non-finished) Activity reference.
+static ANDROID_APP: Mutex<Option<AndroidApp>> = Mutex::new(None);
 static STATUS_BAR_HEIGHT_PX: OnceLock<i32> = OnceLock::new();
 
-/// Called once from `android_main` before `eframe::run_native`.
+/// Called from `android_main` (once per Activity start).
 pub fn init(app: AndroidApp) {
-    let _ = ANDROID_APP.set(app.clone());
+    *ANDROID_APP.lock().unwrap() = Some(app.clone());
     // Compute the status‑bar height once at startup.
     let _ = STATUS_BAR_HEIGHT_PX.set(get_status_bar_height_px(&app));
 }
@@ -81,7 +83,8 @@ fn get_status_bar_height_px(app: &AndroidApp) -> i32 {
 
 /// Space occupied by the system soft keyboard below the usable content area, in egui points.
 pub fn bottom_inset_points(ctx: &Context) -> f32 {
-    let Some(app) = ANDROID_APP.get() else {
+    let guard = ANDROID_APP.lock().unwrap();
+    let Some(ref app) = *guard else {
         return 0.0;
     };
     let rect = app.content_rect();

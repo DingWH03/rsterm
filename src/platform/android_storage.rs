@@ -1,7 +1,7 @@
 //! Android external storage: manifest permissions + runtime prompts.
 //! Also handles BLE runtime permission requests (Android 12+).
 
-use std::sync::OnceLock;
+use std::sync::Mutex;
 
 use jni::errors::Error;
 use jni::objects::{JObject, JObjectArray, JString, JValue};
@@ -14,7 +14,9 @@ const PERMISSION_GRANTED: i32 = 0;
 const REQUEST_CODE_STORAGE: i32 = 42;
 const REQUEST_CODE_BLE: i32 = 43;
 
-static ANDROID_APP: OnceLock<AndroidApp> = OnceLock::new();
+/// Updated on each Activity restart so JNI calls use the current (non-finished)
+/// Activity reference.
+static ANDROID_APP: Mutex<Option<AndroidApp>> = Mutex::new(None);
 
 /// BLE permissions needed on Android 12+ (API 31+).
 const PERM_BLE_SCAN: &str = "android.permission.BLUETOOTH_SCAN";
@@ -171,7 +173,7 @@ fn ensure_all_files_access(env: &mut Env<'_>, activity: &JObject) -> Result<(), 
 /// - API 29-30: `ACCESS_FINE_LOCATION`
 /// - API ≤ 28 : `ACCESS_COARSE_LOCATION`
 pub fn ensure_bluetooth_access(app: &AndroidApp) {
-    let _ = ANDROID_APP.set(app.clone());
+    *ANDROID_APP.lock().unwrap() = Some(app.clone());
     request_bluetooth_access();
 }
 
@@ -180,9 +182,12 @@ pub fn ensure_bluetooth_access(app: &AndroidApp) {
 /// Android permission prompts are asynchronous; callers should start scanning only after
 /// [`has_bluetooth_access`] returns true.
 pub fn request_bluetooth_access() {
-    let Some(app) = ANDROID_APP.get().cloned() else {
-        log::warn!("BLE permission request skipped: Android app is not initialized");
-        return;
+    let app = match ANDROID_APP.lock().unwrap().clone() {
+        Some(a) => a,
+        None => {
+            log::warn!("BLE permission request skipped: Android app is not initialized");
+            return;
+        }
     };
 
     let worker = app.clone();
@@ -195,7 +200,8 @@ pub fn request_bluetooth_access() {
 
 /// Whether every Android runtime permission needed for BLE scanning is currently granted.
 pub fn has_bluetooth_access() -> bool {
-    let Some(app) = ANDROID_APP.get() else {
+    let guard = ANDROID_APP.lock().unwrap();
+    let Some(ref app) = *guard else {
         return false;
     };
 
