@@ -19,6 +19,42 @@ pub fn init(app: AndroidApp) {
     let _ = STATUS_BAR_HEIGHT_PX.set(get_status_bar_height_px(&app));
 }
 
+/// Reset Android IME composing state while keeping the keyboard visible.
+///
+/// Some Android keyboards keep an internal composing/suggestion buffer for
+/// NativeActivity's non-EditText view. When the user presses backspace, the
+/// keyboard may consume a few deletes to clear that buffer before it starts
+/// sending real key events to winit/egui. Calling the Activity helper after
+/// committed text input clears that stale buffer.
+pub fn restart_input() {
+    let app = {
+        let guard = ANDROID_APP.lock().unwrap();
+        guard.clone()
+    };
+    let Some(app) = app else {
+        return;
+    };
+
+    let jvm = unsafe { JavaVM::from_raw(app.vm_as_ptr() as *mut jni::sys::JavaVM) };
+    let _ = jvm.attach_current_thread(|env| -> Result<(), jni::errors::Error> {
+        let activity = unsafe {
+            jni::objects::JObject::from_raw(
+                env,
+                app.activity_as_ptr() as jni::sys::jobject,
+            )
+        };
+
+        env.call_method(
+            &activity,
+            jni_str!("restartRsTerminalInput"),
+            jni_sig!("()V"),
+            &[],
+        )?;
+
+        Ok(())
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Status‑bar inset
 // ---------------------------------------------------------------------------
