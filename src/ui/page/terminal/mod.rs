@@ -19,14 +19,16 @@ use crate::terminal::{Terminal, DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS};
 use crate::ui::page::terminal::grid::{apply_resize, drain_after_resize};
 use crate::ui::widget::clipboard::{read_text, write_text};
 
-#[cfg(target_os = "android")]
-use crate::ui::page::terminal::input::sync_android_soft_input;
 use crate::ui::widget::keyboard::VirtualKeyboard;
 use crate::ui::widget::sidebar::Sidebar;
 use crate::ui::widget::style;
 use crate::ui::page::terminal::input::{
     allocate_terminal_surface, lock_terminal_focus, process_keyboard_input,
     terminal_widget_id, TERMINAL_GRID_MARGIN,
+};
+#[cfg(target_os = "android")]
+use crate::ui::page::terminal::input::{
+    hide_android_terminal_ime, show_android_terminal_ime, update_android_terminal_ime_rect,
 };
 use crate::ui::page::terminal::paint::{paint_row, RowGalleyCache};
 use crate::ui::page::terminal::mouse::{
@@ -485,8 +487,9 @@ pub fn connection_view(
             if toolbar_button(ui, kb_icon).clicked() {
                 keyboard.toggle();
                 #[cfg(target_os = "android")]
-                if keyboard.visible && !keyboard.ime_active {
-                    sync_android_soft_input(ui.ctx(), false, egui::Rect::NOTHING);
+                if keyboard.visible {
+                    keyboard.terminal_ime_enabled = false;
+                    hide_android_terminal_ime(ui.ctx());
                 }
             }
 
@@ -508,11 +511,7 @@ pub fn connection_view(
     // 2. Measure and resize terminal
     let available = ui.available_size();
     #[cfg(target_os = "android")]
-    let ime_inset = if keyboard.ime_active {
-        crate::platform::get().bottom_inset_points(ui.ctx())
-    } else {
-        0.0
-    };
+    let ime_inset = crate::platform::get().bottom_inset_points(ui.ctx());
     #[cfg(not(target_os = "android"))]
     let ime_inset = 0.0;
     let kb_total = keyboard.reserved_height(available.x);
@@ -641,10 +640,8 @@ pub fn connection_view(
         term_resp.request_focus();
         #[cfg(target_os = "android")]
         {
-            // Activate the system IME once on explicit tap.
-            // Per-frame code below updates the IME rect but never forces a
-            // reopen — if the user dismisses the IME it stays dismissed.
-            keyboard.ime_activation_pending = true;
+            keyboard.terminal_ime_enabled = true;
+            show_android_terminal_ime(ui.ctx(), grid_rect);
         }
     }
     if session.as_ref().is_some_and(|s| s.want_terminal_focus) {
@@ -705,8 +702,8 @@ pub fn connection_view(
                     session.touch_state.scrolled_this_touch = false;
                     #[cfg(target_os = "android")]
                     {
-                        keyboard.ime_active = false;
-                        sync_android_soft_input(ui.ctx(), false, egui::Rect::NOTHING);
+                        keyboard.terminal_ime_enabled = false;
+                        hide_android_terminal_ime(ui.ctx());
                     }
                     ctx.request_repaint();
                 }
@@ -1120,22 +1117,12 @@ pub fn connection_view(
     }
     #[cfg(target_os = "android")]
     {
-        // Only enable the IME when the user explicitly tapped the terminal.
-        if keyboard.ime_activation_pending && term_resp.has_focus() {
-            keyboard.ime_activation_pending = false;
-            keyboard.ime_active = true;
-            sync_android_soft_input(ui.ctx(), true, grid_rect);
-        }
-
-        if keyboard.ime_active && term_resp.has_focus() {
-            // Keep the IME rect updated (e.g. after resize) but do NOT
-            // re-send IMEAllowed(true) — that would force-reopen if the
-            // user dismissed the keyboard.
-            ctx.send_viewport_cmd(
-                egui::viewport::ViewportCommand::IMERect(grid_rect),
-            );
-        } else {
-            sync_android_soft_input(ui.ctx(), false, egui::Rect::NOTHING);
+        // Keep only a logical "terminal owns the IME" flag. Android Back can
+        // hide the keyboard without notifying egui; do not clear this flag just
+        // because the inset disappeared. The next terminal tap will call
+        // `show_android_terminal_ime` again and reopen it.
+        if keyboard.terminal_ime_enabled && term_focused {
+            update_android_terminal_ime_rect(ui.ctx(), grid_rect);
         }
     }
 

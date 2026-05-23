@@ -558,20 +558,6 @@ impl RsTerminalApp {
 }
 
 
-#[cfg(target_os = "android")]
-fn restart_android_ime_after_committed_text(ctx: &egui::Context) {
-    let has_committed_text = ctx.input(|i| {
-        i.events.iter().any(|event| match event {
-            egui::Event::Text(text) => !text.is_empty(),
-            egui::Event::Ime(egui::ImeEvent::Commit(text)) => !text.is_empty(),
-            _ => false,
-        })
-    });
-
-    if has_committed_text {
-        crate::platform::android_ime::restart_input();
-    }
-}
 
 impl eframe::App for RsTerminalApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -593,9 +579,6 @@ impl eframe::App for RsTerminalApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-
-        #[cfg(target_os = "android")]
-        restart_android_ime_after_committed_text(&ctx);
 
         // Android back button.
         #[cfg(target_os = "android")]

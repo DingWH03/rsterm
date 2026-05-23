@@ -50,21 +50,42 @@ pub fn allocate_terminal_surface(
     (panel_rect, grid_rect, response)
 }
 
-/// Show/hide the Android soft keyboard (winit maps `IMEAllowed` → `show_soft_input`).
+/// Open the Android soft keyboard for the terminal canvas.
+///
+/// The terminal grid is not an egui `TextEdit`, so egui/winit does not always
+/// reopen the native IME after the user dismisses it with Android Back. Keep all
+/// terminal-specific IME control in these helpers instead of scattering direct
+/// Activity calls through the UI code.
 #[cfg(target_os = "android")]
-pub fn sync_android_soft_input(ctx: &Context, enable: bool, ime_area: egui::Rect) {
+pub fn show_android_terminal_ime(ctx: &Context, ime_area: egui::Rect) {
     use egui::viewport::{IMEPurpose, ViewportCommand};
-    if enable {
-        ctx.send_viewport_cmd(ViewportCommand::IMERect(ime_area));
-        ctx.send_viewport_cmd(ViewportCommand::IMEPurpose(IMEPurpose::Terminal));
-        ctx.send_viewport_cmd(ViewportCommand::IMEAllowed(true));
-    } else {
-        ctx.send_viewport_cmd(ViewportCommand::IMEAllowed(false));
-    }
+    ctx.send_viewport_cmd(ViewportCommand::IMERect(ime_area));
+    ctx.send_viewport_cmd(ViewportCommand::IMEPurpose(IMEPurpose::Terminal));
+    ctx.send_viewport_cmd(ViewportCommand::IMEAllowed(true));
+    crate::platform::android_ime::show_soft_input();
+}
+
+/// Update only the IME cursor/target rectangle. This must not force-show the
+/// keyboard every frame; otherwise Android Back would immediately reopen it.
+#[cfg(target_os = "android")]
+pub fn update_android_terminal_ime_rect(ctx: &Context, ime_area: egui::Rect) {
+    ctx.send_viewport_cmd(egui::viewport::ViewportCommand::IMERect(ime_area));
+}
+
+/// Close the Android soft keyboard for terminal-specific UI states such as
+/// selection handles or rsTerminal's own virtual keyboard.
+#[cfg(target_os = "android")]
+pub fn hide_android_terminal_ime(ctx: &Context) {
+    ctx.send_viewport_cmd(egui::viewport::ViewportCommand::IMEAllowed(false));
+    crate::platform::android_ime::hide_soft_input();
 }
 
 #[cfg(not(target_os = "android"))]
-pub fn sync_android_soft_input(_ctx: &Context, _enable: bool, _ime_area: egui::Rect) {}
+pub fn show_android_terminal_ime(_ctx: &Context, _ime_area: egui::Rect) {}
+#[cfg(not(target_os = "android"))]
+pub fn update_android_terminal_ime_rect(_ctx: &Context, _ime_area: egui::Rect) {}
+#[cfg(not(target_os = "android"))]
+pub fn hide_android_terminal_ime(_ctx: &Context) {}
 
 /// Keep arrow/tab/escape on the terminal (egui focus navigation runs in `begin_pass`).
 pub fn lock_terminal_focus(ctx: &Context) {
@@ -126,35 +147,25 @@ pub fn process_keyboard_input(
                     false
                 }
                 Event::Text(text) => {
-                    let ctrl = modifiers.ctrl || modifiers.command || virtual_ctrl;
-                    if ctrl {
-                        let mut bytes = Vec::new();
-                        for c in text.chars() {
-                            if (c == 'c' || c == 'C')
-                                && has_selection
-                                && !modifiers.shift
-                            {
-                                *copy_requested = true;
-                                continue;
-                            }
-                            if let Some(b) = ctrl_byte_for_char(c) {
-                                bytes.push(b);
-                            }
-                        }
-                        if !bytes.is_empty() {
-                            pending_input.push(bytes);
-                        }
-                    } else if text
-                        .as_bytes()
-                        .iter()
-                        .any(|&b| b < 0x20 || b == 0x7f)
-                    {
-                        // Text with control/DEL chars – forward them as-is so
-                        // the PTY sees backspace etc. when the IME sends them.
-                        pending_input.push(text.as_bytes().to_vec());
-                    } else {
-                        pending_input.push(text.as_bytes().to_vec());
-                    }
+                    route_text_to_terminal(
+                        text,
+                        modifiers,
+                        virtual_ctrl,
+                        has_selection,
+                        copy_requested,
+                        pending_input,
+                    );
+                    false
+                }
+                Event::Ime(egui::ImeEvent::Commit(text)) => {
+                    route_text_to_terminal(
+                        text,
+                        modifiers,
+                        virtual_ctrl,
+                        has_selection,
+                        copy_requested,
+                        pending_input,
+                    );
                     false
                 }
                 Event::Key {
@@ -179,6 +190,37 @@ pub fn process_keyboard_input(
             }
         });
     });
+}
+
+
+fn route_text_to_terminal(
+    text: &str,
+    modifiers: Modifiers,
+    virtual_ctrl: bool,
+    has_selection: bool,
+    copy_requested: &mut bool,
+    pending_input: &mut Vec<Vec<u8>>,
+) {
+    let ctrl = modifiers.ctrl || modifiers.command || virtual_ctrl;
+    if ctrl {
+        let mut bytes = Vec::new();
+        for c in text.chars() {
+            if (c == 'c' || c == 'C') && has_selection && !modifiers.shift {
+                *copy_requested = true;
+                continue;
+            }
+            if let Some(b) = ctrl_byte_for_char(c) {
+                bytes.push(b);
+            }
+        }
+        if !bytes.is_empty() {
+            pending_input.push(bytes);
+        }
+    } else {
+        // Forward printable text and control/DEL chars as-is so the PTY sees
+        // backspace/newline etc. when an IME sends them as committed text.
+        pending_input.push(text.as_bytes().to_vec());
+    }
 }
 
 /// Map egui keys to bytes for the PTY.

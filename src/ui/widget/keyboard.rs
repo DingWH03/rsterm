@@ -49,13 +49,11 @@ pub struct VirtualKeyboard {
     ctrl: bool,
     show_fn: bool,
     layer: Layer,
-    /// Android system IME is active: virtual keyboard is limited to function keys only.
+    /// Terminal currently owns Android's system IME. This is a logical state,
+    /// not a visibility flag: Android Back may hide the keyboard while terminal
+    /// focus remains, and the next terminal tap should reopen it.
     #[cfg(target_os = "android")]
-    pub ime_active: bool,
-    /// Set to `true` for one frame when the user tapped the terminal area;
-    /// the per-frame IME sync code will activate the IME and clear this flag.
-    #[cfg(target_os = "android")]
-    pub ime_activation_pending: bool,
+    pub terminal_ime_enabled: bool,
 }
 
 impl VirtualKeyboard {
@@ -68,9 +66,7 @@ impl VirtualKeyboard {
             show_fn: false,
             layer: Layer::Alpha,
             #[cfg(target_os = "android")]
-            ime_active: false,
-            #[cfg(target_os = "android")]
-            ime_activation_pending: false,
+            terminal_ime_enabled: false,
         }
     }
 
