@@ -535,8 +535,11 @@ impl eframe::App for RsTerminalApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
-        // Android back button is handled via accesskit → close_requested()
-        // in `logic()` above.  No special handling needed in `ui()`.
+        // Android back button: custom NativeActivity → JNI → atomic flag.
+        #[cfg(target_os = "android")]
+        crate::platform::android_back::consume_back_pressed(|| {
+            self.handle_back_navigation(&ctx)
+        });
         // Apply UI theme on every frame (cheap — only changes if setting changed).
         self.settings.ui_theme.apply(&ctx);
         self.sidebar.sync_width(ctx.content_rect().width());

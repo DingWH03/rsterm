@@ -74,6 +74,8 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
 
     // -- Initialise platform trait + Android services --------------------
     platform::init_android_platform(&app);
+    // -- Back‑button interception via custom NativeActivity -----
+    platform::android_back::init(&app);
 
     // -- Initialise persistent config path ------------------------------
     // Android NativeActivity does NOT set $HOME / $XDG_CONFIG_HOME, so

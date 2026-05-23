@@ -30,6 +30,8 @@ pub(crate) mod android_btleplug;
 pub(crate) mod android_ime;
 #[cfg(target_os = "android")]
 pub(crate) mod android_storage;
+#[cfg(target_os = "android")]
+pub(crate) mod android_back;
 
 // ── Platform selection ──────────────────────────────────────────────────────
 
