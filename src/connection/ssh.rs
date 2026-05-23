@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{mpsc, Arc};
+use std::time::Duration;
 
 use russh::client::{self, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::{load_secret_key, PrivateKeyWithHashAlg};
 use russh::{ChannelMsg, Disconnect};
 use tokio::sync::mpsc::unbounded_channel;
+use tokio::time::timeout;
 
 use crate::connection::{
     emit_conn_data, ssh_keys, ConnIn, ConnOut, ConnectionHandle, ConnectionState, RepaintNotifier,
@@ -103,37 +105,50 @@ async fn run_ssh(
         }
     });
 
-    let ssh_config = Arc::new(client::Config::default());
-    let mut handle = client::connect(ssh_config, (host, port), SshClient)
+    let ssh_config = Arc::new(client::Config {
+        // Send keepalive every 15 s; if 3 in a row go unanswered, close the connection.
+        keepalive_interval: Some(Duration::from_secs(15)),
+        keepalive_max: 3,
+        // Also garbage-collect if the entire session has been idle this long.
+        inactivity_timeout: Some(Duration::from_secs(180)),
+        nodelay: true,
+        ..Default::default()
+    });
+
+    let mut handle = timeout(Duration::from_secs(20), client::connect(ssh_config, (host, port), SshClient))
         .await
+        .map_err(|_| format!("SSH connection to {host}:{port} timed out (20s)"))?
         .map_err(|e| e.to_string())?;
 
     let password = saved_password
         .or_else(|| std::env::var("SSH_PASSWORD").ok())
         .or_else(|| std::env::var("RSTERMINAL_SSH_PASSWORD").ok());
 
-    authenticate(&mut handle, user, password.as_deref()).await?;
-
-    let mut channel = handle
-        .channel_open_session()
+    timeout(Duration::from_secs(30), authenticate(&mut handle, user, password.as_deref()))
         .await
+        .map_err(|_| "SSH authentication timed out (30s)".to_string())?
+        .map_err(|e| e.to_string())?;
+
+    let mut channel = timeout(Duration::from_secs(15), handle.channel_open_session())
+        .await
+        .map_err(|_| "Opening SSH channel timed out".to_string())?
         .map_err(|e| e.to_string())?;
 
     let cols_u = cols.max(1) as u32;
     let rows_u = rows.max(1) as u32;
 
-    channel
-        .request_pty(false, "xterm-256color", cols_u, rows_u, 0, 0, &[])
+    timeout(Duration::from_secs(10), channel.request_pty(false, "xterm-256color", cols_u, rows_u, 0, 0, &[]))
         .await
+        .map_err(|_| "PTY request timed out".to_string())?
         .map_err(|e| e.to_string())?;
 
     for (key, value) in env_vars {
         let _ = channel.set_env(true, key, value).await;
     }
 
-    channel
-        .request_shell(true)
+    timeout(Duration::from_secs(10), channel.request_shell(true))
         .await
+        .map_err(|_| "Shell request timed out".to_string())?
         .map_err(|e| e.to_string())?;
 
     let _ = from_tx.send(ConnIn::StateChanged(ConnectionState::Connected));

@@ -871,6 +871,12 @@ impl eframe::App for RsTerminalApp {
                 self.close_session(&id);
             }
         }
+        if let ConnectionViewAction::Reconnect(ref conn_id) = view_action {
+            if let Some(id) = self.active_session_id.clone() {
+                self.close_session(&id);
+            }
+            self.connect_to(conn_id);
+        }
         ctx.request_repaint_after(std::time::Duration::from_millis(400));
     }
 }

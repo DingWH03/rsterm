@@ -9,6 +9,7 @@ use russh::client::{self, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::{load_secret_key, PrivateKeyWithHashAlg};
 use russh_sftp::client::SftpSession;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::time::timeout;
 
 use crate::connection::ssh_keys;
 use crate::fs::entry_info::{self, EntryInfo};
@@ -265,18 +266,29 @@ fn sftp_worker(
         .build()
         .map_err(|e| e.to_string())?;
 
-    let sftp = match rt.block_on(connect_sftp(host, port, user, password.as_deref())) {
-        Ok(sftp) => {
+    let sftp = match rt.block_on(timeout(
+        Duration::from_secs(25),
+        connect_sftp(host, port, user, password.as_deref()),
+    )) {
+        Ok(Ok(sftp)) => {
             *status.lock().unwrap() = SftpStatus::Connected;
             sftp
         }
-        Err(e) => {
-            *status.lock().unwrap() = SftpStatus::Error(e.clone());
-            // Drain all pending and future requests with the error.
+        Ok(Err(e)) => {
+            let msg = format!("SFTP connection failed: {e}");
+            *status.lock().unwrap() = SftpStatus::Error(msg.clone());
             while let Ok(req) = req_rx.recv() {
-                reply_err!(req, &e);
+                reply_err!(req, &msg);
             }
-            return Err(e);
+            return Err(msg);
+        }
+        Err(_) => {
+            let msg = format!("SFTP connection to {host}:{port} timed out (25s)");
+            *status.lock().unwrap() = SftpStatus::Error(msg.clone());
+            while let Ok(req) = req_rx.recv() {
+                reply_err!(req, &msg);
+            }
+            return Err(msg);
         }
     };
     sftp.set_timeout(120);
@@ -370,7 +382,13 @@ async fn connect_sftp(
     user: &str,
     password: Option<&str>,
 ) -> Result<SftpSession, String> {
-    let ssh_config = Arc::new(client::Config::default());
+    let ssh_config = Arc::new(client::Config {
+        keepalive_interval: Some(Duration::from_secs(15)),
+        keepalive_max: 3,
+        inactivity_timeout: Some(Duration::from_secs(180)),
+        nodelay: true,
+        ..Default::default()
+    });
     let mut handle =
         client::connect(ssh_config, (host, port), SftpSshClient)
             .await

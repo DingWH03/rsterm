@@ -133,6 +133,8 @@ pub enum ConnectionViewAction {
     None,
     /// Close the session currently shown in the terminal panel.
     CloseSession,
+    /// Reconnect the current SSH session using the given saved-connection id.
+    Reconnect(String),
 }
 
 /// A workspace tab: either a terminal emulator or a file manager.
@@ -560,6 +562,8 @@ pub fn connection_view(
             } else {
                 rust_i18n::t!("connection_failed").into_owned()
             };
+            let mut reconnect = false;
+            let can_reconnect = session.saved_conn_id.is_some();
             egui::Frame::new()
                 .fill(egui::Color32::from_rgba_unmultiplied(20, 20, 20, 240))
                 .show(ui, |ui| {
@@ -575,11 +579,25 @@ pub fn connection_view(
                         ui.add_space(8.0);
                         ui.label(egui::RichText::new(msg).size(14.0));
                         ui.add_space(16.0);
+                        if can_reconnect {
+                            if ui
+                                .button(rust_i18n::t!("reconnect"))
+                                .clicked()
+                            {
+                                reconnect = true;
+                            }
+                            ui.add_space(8.0);
+                        }
                         if ui.button(rust_i18n::t!("close")).clicked() {
                             close = true;
                         }
                     });
                 });
+            if reconnect {
+                if let Some(ref id) = session.saved_conn_id {
+                    action = ConnectionViewAction::Reconnect(id.clone());
+                }
+            }
             if close {
                 action = ConnectionViewAction::CloseSession;
             }
