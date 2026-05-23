@@ -144,11 +144,15 @@ pub fn process_keyboard_input(
                         if !bytes.is_empty() {
                             pending_input.push(bytes);
                         }
-                    } else if !text
+                    } else if text
                         .as_bytes()
                         .iter()
                         .any(|&b| b < 0x20 || b == 0x7f)
                     {
+                        // Text with control/DEL chars – forward them as-is so
+                        // the PTY sees backspace etc. when the IME sends them.
+                        pending_input.push(text.as_bytes().to_vec());
+                    } else {
                         pending_input.push(text.as_bytes().to_vec());
                     }
                     false
