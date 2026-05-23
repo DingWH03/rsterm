@@ -872,10 +872,29 @@ impl eframe::App for RsTerminalApp {
             }
         }
         if let ConnectionViewAction::Reconnect(ref conn_id) = view_action {
-            if let Some(id) = self.active_session_id.clone() {
-                self.close_session(&id);
+            if let Some(idx) = self.active_session_index() {
+                if let WorkspaceSession::Terminal(session) = &mut self.sessions[idx] {
+                    if matches!(session.conn_type, ConnectionType::Ssh) {
+                        if let Some(config) =
+                            self.saved_connections.iter().find(|c| c.id == *conn_id)
+                        {
+                            match ssh::connect_ssh(
+                                config,
+                                &self.settings.ssh_env_vars,
+                                24,
+                                80,
+                            ) {
+                                Ok(new_handle) => {
+                                    session.handle = new_handle;
+                                    session.disconnect_message = None;
+                                    session.want_terminal_focus = true;
+                                }
+                                Err(e) => self.connection_notice = Some(e),
+                            }
+                        }
+                    }
+                }
             }
-            self.connect_to(conn_id);
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(400));
     }
