@@ -17,6 +17,11 @@ static ACTIVITY: Mutex<Option<GlobalRef>> = Mutex::new(None);
 /// Can be called again on Activity restart (same process).
 pub fn init(app: &winit::platform::android::activity::AndroidApp) {
     use jni_0_19::objects::JObject;
+
+    // Android may keep the same process after the Activity is recreated.
+    // Clear any stale signal before the new UI starts polling input.
+    BACK_PRESSED.store(false, Ordering::SeqCst);
+
     if let Ok(jvm) = unsafe {
         jni_0_19::JavaVM::from_raw(app.vm_as_ptr() as *mut jni_0_19::sys::JavaVM)
     } {
@@ -42,8 +47,9 @@ pub unsafe extern "system" fn Java_dev_rsTerminal_app_RsTerminalActivity_nativeO
     BACK_PRESSED.store(true, Ordering::SeqCst);
 }
 
-/// Call from `ui()` each frame.  Runs `handle` when back was pressed.
-/// Finishes the Activity when `handle` returns `false`.
+/// Call from `ui()` each frame. Runs `handle` when back was pressed.
+///
+/// The closure returns whether the press was consumed by in-app navigation.
 pub fn consume_back_pressed(handle: impl FnOnce() -> bool) -> bool {
     if !BACK_PRESSED.swap(false, Ordering::SeqCst) {
         return false;
@@ -51,21 +57,43 @@ pub fn consume_back_pressed(handle: impl FnOnce() -> bool) -> bool {
     if handle() {
         return true;
     }
-    // Don't call finish_activity() here – the caller (app.rs) should
-    // send ViewportCommand::Close instead, so eframe exits gracefully.
-    // (Navigation handler doesn't have the egui ctx in this scope.)
     true
 }
 
-/// Call `finish()` on the Activity via JNI (public so app.rs can call it).
-pub fn finish_activity() {
+fn with_activity<R>(f: impl FnOnce(&jni_0_19::JNIEnv<'_>, &GlobalRef) -> R) -> Option<R> {
     let jvm_guard = JVM.lock().unwrap();
     let act_guard = ACTIVITY.lock().unwrap();
-    if let Some(ref jvm) = *jvm_guard {
-        if let Some(ref act) = *act_guard {
-            if let Ok(env) = jvm.attach_current_thread() {
-                let _ = env.call_method(act.as_obj(), "finish", "()V", &[]);
-            }
-        }
-    }
+    let jvm = jvm_guard.as_ref()?;
+    let act = act_guard.as_ref()?;
+    let env = jvm.attach_current_thread().ok()?;
+    Some(f(&env, act))
+}
+
+/// Move the task to the background without destroying the NativeActivity.
+///
+/// This is the safest Android "exit" path for winit/eframe: destroying the
+/// Activity can recreate `android_main` in the same process, which may collide
+/// with the previous event loop while it is still shutting down.
+pub fn move_task_to_back() -> bool {
+    with_activity(|env, act| {
+        env.call_method(
+            act.as_obj(),
+            "moveTaskToBack",
+            "(Z)Z",
+            &[jni_0_19::objects::JValue::Bool(jni_0_19::sys::JNI_TRUE)],
+        )
+            .and_then(|v| v.z())
+            .unwrap_or(false)
+    })
+    .unwrap_or(false)
+}
+
+/// Call `finish()` on the Activity via JNI. Kept as a fallback for non-back
+/// lifecycle paths, but normal Android back navigation should prefer
+/// [`move_task_to_back`] to avoid same-process event-loop recreation crashes.
+pub fn finish_activity() -> bool {
+    with_activity(|env, act| {
+        env.call_method(act.as_obj(), "finish", "()V", &[]).is_ok()
+    })
+    .unwrap_or(false)
 }

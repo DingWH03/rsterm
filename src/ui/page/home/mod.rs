@@ -1,3 +1,4 @@
+pub mod recent;
 pub mod sidebar;
 
 use crate::storage::types::{ConnectionType, SavedConnection};

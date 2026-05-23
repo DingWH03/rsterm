@@ -12,6 +12,7 @@ use crate::ui::page::terminal::{
     drain_connection, ActiveSession, ConnectionViewAction, connection_view,
 };
 use crate::ui::page::file_manager::{file_manager_view, FileManagerAction};
+use crate::ui::page::home::recent::recent_connections_view;
 use crate::ui::widget::dialogs::{LocalTerminalSettingsDialog, NewConnectionDialog};
 use crate::ui::widget::keyboard::VirtualKeyboard;
 use crate::ui::page::settings::{settings_page, settings_side_panel};
@@ -516,6 +517,39 @@ impl RsTerminalApp {
         false
     }
 
+    fn request_app_exit(&mut self, ctx: &egui::Context) {
+        self.save_profile_tweaks();
+
+        #[cfg(target_os = "android")]
+        {
+            // Do not destroy NativeActivity for a normal Back-at-root exit.
+            // Moving the task to the background avoids recreating eframe/winit
+            // in the same process, which caused the next launch to crash.
+            if crate::platform::android_back::move_task_to_back() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            } else {
+                let _ = crate::platform::android_back::finish_activity();
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
+    fn handle_close_request(&mut self, ctx: &egui::Context) {
+        if self.quit_after_close {
+            return;
+        }
+        if self.handle_back_navigation(ctx) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        } else {
+            self.request_app_exit(ctx);
+        }
+    }
+
     fn active_session_index(&self) -> Option<usize> {
         self.active_session_id
             .as_ref()
@@ -537,18 +571,7 @@ impl eframe::App for RsTerminalApp {
             return;
         }
         if ctx.input(|i| i.viewport().close_requested()) {
-            if self.quit_after_close {
-                return;
-            }
-            if self.handle_back_navigation(ctx) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            } else {
-                // No navigation possible – the app should exit.
-                // Ensure the Android Activity is properly finished so the
-                // system doesn't keep a stale task around.
-                #[cfg(target_os = "android")]
-                crate::platform::android_back::finish_activity();
-            }
+            self.handle_close_request(ctx);
         }
     }
 
@@ -565,7 +588,7 @@ impl eframe::App for RsTerminalApp {
                 if self.handle_back_navigation(&ctx) {
                     true
                 } else {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    self.request_app_exit(&ctx);
                     true
                 }
             });
@@ -574,7 +597,7 @@ impl eframe::App for RsTerminalApp {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::BrowserBack))
             {
                 if !self.handle_back_navigation(&ctx) {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    self.request_app_exit(&ctx);
                 }
             }
         }
@@ -597,7 +620,7 @@ impl eframe::App for RsTerminalApp {
         if show_quit_confirm_dialog(&ctx, &mut self.show_quit_dialog, session_count) {
             self.quit_after_close = true;
             self.close_all_sessions();
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            self.request_app_exit(&ctx);
         }
 
         self.drain_inactive_sessions();
@@ -833,178 +856,3 @@ impl eframe::App for RsTerminalApp {
     }
 }
 
-// ─── Recent connections view (central panel, no active session) ──────────────
-
-fn recent_connections_view(
-    ui: &mut egui::Ui,
-    sidebar: &mut Sidebar,
-    connections: &[SavedConnection],
-    connect_clicked: &mut Option<String>,
-    more_clicked: &mut bool,
-) {
-    // Collect all connections, sorted by last_connected desc (recently connected first)
-    let mut recent: Vec<&SavedConnection> = connections.iter().collect();
-    recent.sort_by(|a, b| {
-        b.last_connected
-            .as_deref()
-            .unwrap_or("")
-            .cmp(&a.last_connected.as_deref().unwrap_or(""))
-            .then_with(|| a.name.cmp(&b.name))
-    });
-    let show_count = recent.len().min(5);
-    let recent = &recent[..show_count];
-
-    if recent.is_empty() {
-        // ── Empty state ──────────────────────────────────────────────────
-        // Header bar with hamburger (matching terminal layout)
-        ui.horizontal(|ui| {
-            ui.style_mut().spacing.button_padding = egui::vec2(4.0, 1.0);
-            ui.style_mut().spacing.item_spacing.x = 4.0;
-
-            if sidebar.show_content_hamburger()
-                && sidebar.hamburger(ui).clicked()
-            {
-                sidebar.hamburger_click();
-            }
-            ui.label(
-                egui::RichText::new(rust_i18n::t!("recent_connections"))
-                    .size(12.0)
-                    .strong()
-                    .color(ui.visuals().text_color()),
-            );
-        });
-        ui.add_space(40.0);
-        ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new("\u{1F4CB}").size(36.0));
-            ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new(rust_i18n::t!("home_no_connections"))
-                    .size(15.0)
-                    .color(ui.visuals().weak_text_color()),
-            );
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new(rust_i18n::t!("open_terminal_hint"))
-                    .size(12.0)
-                    .color(ui.visuals().weak_text_color()),
-            );
-        });
-        return;
-    }
-
-    // ── Header bar (matching terminal layout) ────────────────────────────
-    ui.horizontal(|ui| {
-        ui.style_mut().spacing.button_padding = egui::vec2(4.0, 1.0);
-        ui.style_mut().spacing.item_spacing.x = 4.0;
-
-        if sidebar.show_content_hamburger()
-            && sidebar.hamburger(ui).clicked()
-        {
-            sidebar.hamburger_click();
-        }
-        ui.label(
-            egui::RichText::new(rust_i18n::t!("recent_connections"))
-                .size(12.0)
-                .strong()
-                .color(ui.visuals().text_color()),
-        );
-    });
-    ui.add_space(4.0);
-
-    // ── Connection rows ──────────────────────────────────────────────────
-    let row_h = 40.0;
-    let available_w = ui.available_width();
-
-    for conn in recent {
-        let row_rect = egui::Rect::from_min_size(
-            ui.cursor().min,
-            egui::vec2(available_w, row_h),
-        );
-        let row_resp = ui.allocate_rect(row_rect, egui::Sense::click());
-
-        if row_resp.clicked() {
-            *connect_clicked = Some(conn.id.clone());
-        }
-
-        if ui.is_rect_visible(row_rect) {
-            let painter = ui.painter_at(row_rect);
-
-            let bg = if row_resp.hovered() {
-                ui.visuals().widgets.hovered.bg_fill
-            } else {
-                ui.visuals().extreme_bg_color
-            };
-            painter.rect_filled(row_rect, egui::CornerRadius::same(4), bg);
-
-            // Type icon
-            let icon = conn.conn_type.icon();
-            let icon_g = ui.fonts_mut(|f| {
-                f.layout(
-                    icon.to_string(),
-                    egui::FontId::proportional(16.0),
-                    ui.visuals().text_color(),
-                    f32::INFINITY,
-                )
-            });
-            painter.galley(
-                egui::pos2(
-                    row_rect.left() + 8.0,
-                    row_rect.center().y - icon_g.size().y / 2.0,
-                ),
-                icon_g,
-                ui.visuals().text_color(),
-            );
-
-            // Name
-            let text_left = row_rect.left() + 34.0;
-            let name_w = row_rect.right() - text_left - 8.0;
-            let name_g = ui.fonts_mut(|f| {
-                f.layout(
-                    conn.name.clone(),
-                    egui::FontId::proportional(13.0),
-                    ui.visuals().text_color(),
-                    name_w,
-                )
-            });
-            painter.galley(
-                egui::pos2(text_left, row_rect.top() + 4.0),
-                name_g,
-                ui.visuals().text_color(),
-            );
-
-            // Subtitle
-            let det_g = ui.fonts_mut(|f| {
-                f.layout(
-                    crate::ui::page::home::conn_subtitle(conn),
-                    egui::FontId::proportional(10.0),
-                    ui.visuals().weak_text_color(),
-                    name_w,
-                )
-            });
-            painter.galley(
-                egui::pos2(text_left, row_rect.top() + 22.0),
-                det_g,
-                ui.visuals().weak_text_color(),
-            );
-        }
-
-        ui.add_space(row_h);
-    }
-
-    // ── More button ──────────────────────────────────────────────────────
-    ui.add_space(2.0);
-    ui.horizontal(|ui| {
-        ui.add_space(8.0);
-        let more_label = format!("{}  →", rust_i18n::t!("view_all"));
-        if ui
-            .button(
-                egui::RichText::new(&more_label)
-                    .size(12.0)
-                    .color(crate::ui::widget::style::ACCENT),
-            )
-            .clicked()
-        {
-            *more_clicked = true;
-        }
-    });
-}
